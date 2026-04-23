@@ -1,0 +1,107 @@
+This chapter formulates the research questions derived from the technological foundations presented in the previous chapter and outlines the methodology used to develop and evaluate a stateful failure tracking and resolution framework for \gls{soa}-based industrial routers. The chapter first introduces guiding questions used to analyse existing research on fault management in distributed and service-oriented systems. Based on the insights derived from this analysis, the core research questions of the thesis are then formulated. The chapter concludes with a structured methodology describing how the proposed framework is designed, implemented, and evaluated.
+
+\section{Guiding Questions for Literature Analysis}
+
+Before defining the specific research questions of the thesis, it is useful to identify several guiding questions that structure the analysis of existing research on fault management in distributed and service-oriented systems. These questions help to assess the current state of research and identify limitations relevant to industrial router environments.
+
+The literature review is therefore guided by the following questions:
+
+\textbf{Q1:} What existing solutions or frameworks have been proposed for fault management in distributed and service-oriented systems?
+
+This question investigates existing approaches for fault detection, isolation, and recovery in distributed and SOA-based systems, including frameworks developed for cloud computing, microservices, IoT platforms, and other distributed architectures.
+
+\textbf{Q2:} How are faults detected in service-oriented systems?
+
+Existing research proposes various detection mechanisms ranging from rule-based and threshold-based monitoring to anomaly detection and predictive methods based on telemetry analysis. This question examines both reactive detection approaches, which identify faults after symptoms occur, and predictive approaches that attempt to anticipate failures through behavioural patterns or telemetry trends.
+
+\textbf{Q3:} How are service dependencies modelled to support root cause localisation and failure propagation analysis?
+
+Service-oriented systems consist of interacting services whose dependencies determine how faults propagate through the system. This question investigates methods used to represent service relationships, such as dependency graphs, causal models, or architectural representations that support root cause analysis.
+
+\textbf{Q4:} What recovery or fault-resolution strategies are proposed in existing frameworks?
+
+Fault management systems employ various recovery strategies including service restart, failover, reconfiguration, redundancy, or controlled degradation. This question examines how existing frameworks coordinate recovery actions and how they manage interactions between dependent services during recovery.
+
+The answers to these guiding questions provide the basis for identifying gaps in the existing literature and motivate the formulation of the core research questions addressed by this thesis.
+
+\section{Core Research Questions}
+
+Based on the technological foundations and the analysis of existing research, the following research questions define the specific objectives of this thesis.
+
+\textbf{RQ1:} How can faults in SOA-based industrial routers be systematically characterised to support precise detection, isolation, and recovery under embedded system constraints?
+
+A structured understanding of relevant fault types is necessary to interpret telemetry, reason about service states, and support deterministic recovery decisions. Existing SOA fault classifications must therefore be interpreted in the context of router-specific hardware behaviour, networking functions, and service interactions. The embedded system constraints relevant to this question are defined in Section 2.7: resource bounds, determinism requirements, long deployment lifecycles, and operational predictability.
+
+\textbf{RQ2:} How can telemetry in industrial routers be organised into a coherent model that enables stateful fault tracking across time and supports root cause localisation under bounded resource constraints?
+
+Metrics, logs, and traces provide complementary information about system behaviour, but they must be aligned with fault types, service behaviour, and dependency structures. A structured telemetry model is required to support efficient detection, episode tracking, and evidence-based reasoning. Detection mechanisms may be reactive, identifying faults after observable symptoms occur, or predictive, attempting to anticipate failures based on behavioural patterns or telemetry trends.
+
+\textbf{RQ3:} How should service dependencies in industrial routers be represented to enable deterministic reasoning about failure propagation and to identify causal relationships between service malfunctions?
+
+Service dependencies form the structural basis for understanding how faults propagate through interacting router services. A suitable dependency model must capture relevant interactions while remaining computationally lightweight, deterministic, and suitable for runtime use.
+
+\textbf{RQ4:} Which deterministic recovery strategies are suitable for industrial routers, and how can episode-aware recovery coordination prevent redundant recovery actions, oscillations, and collateral disruption?
+
+Router constraints require predictable and resource-aware recovery mechanisms. The framework must maintain state across fault episodes, ensure recovery actions execute at most once per episode, and coordinate recovery with dependency relationships to prevent repeated or conflicting recovery actions.
+
+\textbf{RQ5:} How can fault characterisation, telemetry modelling, dependency representation, and recovery strategies be integrated into a stateful \gls{fdir} architecture that coordinates root cause recovery and suppresses dependent symptom faults in SOA-based industrial routers?
+
+This integration represents the central contribution of the thesis. The resulting framework must be coherent, explainable, deterministic, and applicable across router platforms. The exclusion of machine-learning-based inference is a consequence of the determinism and resource constraints identified in Section 2.7 and analysed in Section 4.5, not a pre-determined design choice.
+
+Together, these research questions ensure that the thesis advances the field through a systematic, technically grounded, and practically applicable model for failure tracking and resolution.
+
+\section{Methodology}
+
+The methodology follows a structured research process that aligns directly with the research questions and the constraints of industrial routers. It integrates conceptual analysis, architectural design, prototype implementation, and scenario-based evaluation. The approach ensures traceability between theory, design decisions, and observed outcomes, with particular emphasis on deterministic behaviour, bounded resource usage, and explicit state tracking.
+
+\subsection*{Step 1: Systematic Literature Review}
+
+A focused literature review is conducted across five domains:
+\begin{itemize}
+\item SOA and distributed system fault taxonomies
+\item Telemetry and observability mechanisms
+\item Dependency modelling and failure propagation analysis
+\item \gls{fdir} and self-healing frameworks
+\item Industrial router architecture and embedded system constraints
+\end{itemize}
+
+This review establishes the theoretical foundation, identifies assumptions made in existing work, and exposes gaps related to stateful fault tracking, episode-aware recovery coordination, and deterministic execution in resource-constrained environments.
+
+\subsection*{Step 2: Identification and Structuring of Relevant Fault Types (RQ1)}
+
+Existing SOA fault classifications are analysed in relation to the functional components of industrial routers. Relevant fault types are identified and structured with respect to router services such as routing state management, VPN handling, certificate management, security enforcement, and interface stability.
+
+\subsection*{Step 3: Design of a Structured Telemetry Model (RQ2)}
+
+Metrics, logs, and traces are categorised and mapped to fault types, service states, and fault episode lifecycles. Selection criteria consider resource constraints, relevance, interpretability, and temporal stability. The resulting telemetry model defines which data elements are required to detect fault state transitions, track episode continuity, and support deterministic diagnosis.
+
+\subsection*{Step 4: Modelling Service Dependencies (RQ3)}
+
+A dependency representation is derived based on observed service interactions. This model captures static and dynamic dependencies and enables deterministic reasoning about failure propagation. The representation supports identification of upstream root causes and downstream impacted services while remaining computationally lightweight and suitable for runtime use.
+
+\subsection*{Step 5: Identification and Structuring of Deterministic Recovery Strategies (RQ4)}
+
+Recovery strategies are derived from best practices in router operations, embedded fault tolerance, and self-healing SOA systems. Strategies are classified by recovery scope (parameter refresh, service restart, configuration regeneration, controlled degradation) and are explicitly designed to execute at most once per fault episode, coordinated with dependency relationships to prevent redundant or collateral recovery actions.
+
+\subsection*{Step 6: Integration into a Stateful FDIR Framework (RQ5)}
+
+The adapted taxonomy, telemetry model, dependency representation, and recovery strategies are synthesised into a unified architectural framework. The framework maintains explicit runtime state for fault episodes, rule violations, recovery execution, and suppression status. This integration ensures deterministic behaviour, prevents recovery loops, and enables coordinated suppression of dependent symptom faults during root cause recovery.
+
+\subsection*{Step 7: Scenario-Based Evaluation}
+
+The proposed framework is evaluated using defined failure scenarios representative of industrial router behaviour. Scenarios assess the framework’s ability to:
+\begin{itemize}
+\item detect faults deterministically,
+\item identify root causes via dependency analysis,
+\item execute recovery actions once per episode,
+\item suppress dependent symptom faults, and
+\item operate within bounded resource limits.
+\end{itemize}
+
+Evaluation focuses on correctness, determinism, recovery impact, and resource suitability rather than predictive accuracy.
+
+\subsection*{Step 8: Validation of Research Questions}
+
+Evaluation results are mapped explicitly to the research questions. Each research question is answered based on empirical evidence from the prototype and test scenarios. Strengths, limitations, and applicability are analysed to ensure a coherent link between methodology, findings, and conclusions.
+
+This chapter defined the research questions and outlined a structured methodology for developing and evaluating a stateful FDIR framework for SOA based industrial routers. The research questions address the key gaps identified in the literature and form the basis for fault characterisation, telemetry modelling, dependency analysis, and deterministic recovery design. The methodology follows a logically connected sequence of steps, ensuring academic rigor, traceability, and applicability. The next chapter presents the results of the literature review, which provides the knowledge base for the development of the subsequent architectural framework.

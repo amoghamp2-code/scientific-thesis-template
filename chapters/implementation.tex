@@ -1,0 +1,483 @@
+The previous chapter presented the conceptual design of a stateful \gls{fdir} framework for \gls{soa}-based industrial routers. This chapter describes the prototype that realises that design on a concrete industrial router platform. The purpose of the prototype is twofold: first, to demonstrate that the conceptual architecture can be implemented within the resource and integration constraints of an actual embedded router; and second, to provide a concrete artefact against which the functional and non-functional requirements defined in Section 5.2 can be evaluated (Chapter 7).
+
+The chapter describes only what was implemented and how. Design rationale and literature justification are not repeated from Chapter 5 unless necessary to explain an implementation deviation. Where the prototype deviates from the conceptual design, the deviation is stated explicitly and justified. Where features defined in the conception are not implemented, this is documented in the limitations section.
+
+\subsection{System Overview: What Is Implemented}
+
+The prototype is a C++20 application named \texttt{prism-police} that runs as a long-lived daemon process on a Belden/Hirschmann industrial router platform. The application subscribes to the platform's message bus, receives telemetry definitions, monitoring rules, and telemetry samples at runtime, evaluates samples against threshold-based rules, performs root-cause analysis through declared dependency chains, executes external resolution scripts, and tracks fault episodes as stateful runtime entities.
+
+The prototype implements the complete \gls{fdir} processing pipeline defined in Section 5.8.2: event ingestion, validation, configuration processing, dependency-ordered sample evaluation, rule-based fault detection, episode lifecycle management, root cause analysis, resolution execution, transitive impact suppression, and persistent fault detection. Configuration is delivered through the platform's \gls{yang}/\gls{netconf} infrastructure, and telemetry samples are received through the ZeroMQ-based message bus.
+
+\subsubsection{Target Platform}
+
+The prototype is deployed on the Belden/Hirschmann PRISM platform, an \gls{soa}-based industrial router environment. The platform provides:
+
+\begin{itemize}
+\item A ZeroMQ-based message bus for inter-service communication.
+\item A \gls{yang}/\gls{netconf} configuration engine (\texttt{netconfd-pro}) for declarative service configuration.
+\item A service lifecycle manager that coordinates startup, shutdown, and restart of platform services.
+\item A structured logging infrastructure (\texttt{bil\_log}) for component-tagged diagnostic output.
+\end{itemize}
+
+The prototype integrates with these platform services as a regular SOA participant, consistent with the internal-service placement decision described in Section 5.1.2.
+
+\subsection{Architecture Realisation}
+
+This section maps the seven conceptual components defined in Section 5.8.1 to their implementation in the prototype. Table~\ref{tab:component-mapping} provides the mapping.
+
+\begin{table}[htbp]
+\centering
+\caption{Mapping of conceptual components to implementation artefacts}
+\label{tab:component-mapping}
+\begin{tabular}{p{4cm} p{4cm} p{6cm}}
+\toprule
+Conceptual Component (Section 5.8.1) & Implementation Artefact & Primary Files \\
+\midrule
+InputBlock & InputBlock class & input\_block.hpp, input\_block.cpp \\
+FormatterBlock (coordinator) & FormatterBlock class & formatterBlock.hpp, formatterBlock.cpp \\
+EventQueue & EventQueue class & event\_queue.hpp \\
+FaultDetector & FaultDetector class & fault\_detector.hpp, fault\_detector.cpp \\
+RuleStateTracker & RuleStateTracker class & rule\_state\_tracker.hpp \\
+EpisodeManager & EpisodeManager class & episode\_manager.hpp, episode\_manager.cpp \\
+ResolutionEngine & ResolutionEngine class & resolution\_engine.hpp, resolution\_engine.cpp \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+In addition to the seven core components, the prototype includes two platform integration layers not specified in the conceptual design but required for deployment on the PRISM platform:
+
+\begin{itemize}
+\item PrismPoliceCallbacks: Receives messages from the ZeroMQ message bus, parses YANG-modelled key-value pairs, assembles complete telemetry definitions, rule definitions, and telemetry samples from fragmented message bus deliveries, and forwards assembled objects to \texttt{InputBlock}.
+\item PrismPoliceConfigCache: Extends the platform's \texttt{YangConfigCacheTop} class to receive YANG-modelled configuration from \texttt{netconfd-pro}. Parses the YANG cache on configuration commit, extracts telemetry definitions and rule definitions, and forwards them to \texttt{InputBlock}.
+\end{itemize}
+
+These integration layers bridge the gap between the platform's specific communication mechanisms and the framework's internal data model. They are not part of the conceptual \gls{fdir} architecture but are necessary implementation artefacts for platform deployment.
+
+The root-cause traversal algorithm described in Section 5.5.3 is implemented within FormatterBlock::processSampleEvent() as the method \texttt{computeDeepRootForRule()}, rather than delegated to the \texttt{DependencyAnalyzer} class. The algorithm is functionally identical to the conceptual specification: it follows upstream \texttt{DependsOn} dependencies, checks for active fault episodes via \texttt{EpisodeManager::isActive()}, uses a visited set for cycle termination, and returns the deepest faulted upstream telemetry. The implementation is placed in \texttt{FormatterBlock} because the traversal requires direct access to \texttt{EpisodeManager} state that is co-located within the same coordinator component.
+
+The \texttt{DependencyAnalyzer} class provides an equivalent \texttt{findRootCause()} method and is available for use in configurations where the traversal logic is invoked from outside the main processing pipeline.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{plantuml-architecture-1.png}
+\caption{PlantUML architecture diagram 1}
+\label{fig:plantuml1}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{plantuml-architecture-2.png}
+\caption{PlantUML architecture diagram 2}
+\label{fig:plantuml2}
+\end{figure}
+
+\subsection{Component Description}
+
+This section describes each implemented component, its responsibilities, and its interactions with other components.
+
+\subsubsection{InputBlock}
+
+\texttt{InputBlock} serves as the ingestion and validation gate. It receives telemetry definitions, rule definitions, and telemetry samples from external sources and enforces the validation constraints defined in Section 5.3.2:
+
+\begin{itemize}
+\item Rejects telemetry definitions and rule definitions with empty source or metric name fields.
+\item Rejects telemetry samples with empty source or metric names, negative timestamps, or NaN/infinity values.
+\item Rejects rule definitions with empty dependency pairs in \texttt{DependsOn} or \texttt{Impacts} lists.
+\item Maintains idempotency caches (\texttt{m\_lastTelemetryDefs}, \texttt{m\_lastRuleDefs}) keyed by \texttt{source:metric} to suppress duplicate registrations. If a definition identical to the cached version is received, it is not forwarded to \texttt{FormatterBlock}.
+\item Deduplicates \texttt{DependsOn} and \texttt{Impacts} vectors within rule definitions while preserving declaration order.
+\end{itemize}
+
+Validated, non-duplicate inputs are forwarded to \texttt{FormatterBlock} for enqueuing into the \texttt{EventQueue}.
+
+\subsubsection{FormatterBlock}
+
+\texttt{FormatterBlock} is the central coordinator, implemented using the Facade pattern. It is the largest component in the prototype and fulfils two roles:
+
+First, it implements the \texttt{IDataRepository} interface, serving as the authoritative data store for all telemetry definitions, rule definitions, samples, fault records, dependency graphs, suppression counters, resolved episode records, persistent fault entries, and disabled rule sets. All other components access shared state exclusively through this interface.
+
+Second, it owns and orchestrates all other \gls{fdir} components (\texttt{EventQueue}, \texttt{EpisodeManager}, \texttt{RuleStateTracker}, \texttt{FaultDetector}, \texttt{ResolutionEngine}) via composition. It implements the seven-phase processing pipeline described in Section 5.8.2, invoked through the \texttt{processAllEvents()} method.
+
+State management within \texttt{FormatterBlock} includes:
+
+\begin{itemize}
+\item \texttt{telemetryDefs}: Map from telemetry ID to \texttt{TelemetryDefinition}.
+\item \texttt{ruleDefs}: Map from rule ID to \texttt{RuleDefinition}.
+\item \texttt{dependencies}: Map from telemetry ID to list of upstream telemetry IDs.
+\item \texttt{reverseDependencies}: Map from telemetry ID to list of downstream telemetry IDs.
+\item \texttt{suppressionCounters}: Map from telemetry ID to remaining suppression sample count.
+\item \texttt{resolvedEpisodes}: Set of \texttt{(telemetryId, episodeId)} pairs for which resolution has been executed. The conceptual design supports pruning entries upon episode end (Section 5.6.3); the prototype does not implement this pruning, and the set grows monotonically during operation.
+\item \texttt{persistentFaults}: Vector of \texttt{PersistentFaultData} entries.
+\item \texttt{disabledRules}: Set of rule IDs disabled due to unresolvable dependency references.
+\end{itemize}
+
+When rule definitions change, \texttt{FormatterBlock} invokes \texttt{rebuildAllDependencies()} to reconstruct the forward and reverse dependency graphs from the updated rule declarations. Configuration validation is triggered lazily: the \texttt{configDirty} atomic flag is set when rules change, and \texttt{validateAndEnableConfig()} is called on the next sample arrival, disabling rules whose \texttt{DependsOn} references cannot be resolved to registered telemetry IDs (FR8).
+
+\subsubsection{FaultDetector}
+
+\texttt{FaultDetector} evaluates telemetry samples against registered rules. For each rule matching the incoming sample's source and metric, it compares the sample value against the rule's threshold using the declared operator (GT, LT, EQ, NE, GTE, LTE). If the comparison evaluates to true, a \texttt{FaultStatus} entry is created and stored in the repository. Disabled rules are skipped. If the telemetry ID is currently suppressed, the fault is created with the \texttt{IsSuppressed} flag set to true.
+
+Scope reduction from conception: The conceptual design specifies that rule evaluation supports integer, float, boolean, and string data types (Section 5.3.1). The prototype implements threshold comparison only for \texttt{float} values. The \texttt{TelemetryValue} type is defined as \texttt{std::variant<int, float, bool, std::string>}, but \texttt{FaultDetector::checkRule()} extracts only the \texttt{float} alternative via \texttt{std::get\_if<float>}. For non-float values, the method returns false (no violation). This restricts the prototype to numeric threshold comparisons on floating-point telemetry.
+
+Scope reduction from conception: All faults are assigned \texttt{Severity::Critical}. The \texttt{Severity} enum defines multiple levels, but only Critical is used.
+
+\subsubsection{EpisodeManager}
+
+\texttt{EpisodeManager} tracks the fault episode lifecycle for each telemetry ID. It maintains:
+
+\begin{itemize}
+\item \texttt{activeRuleCount}
+\item \texttt{telemetryActive}
+\item \texttt{episodeId}
+\item \texttt{totalEpisodesStarted}
+\end{itemize}
+
+State transitions follow Section 5.6.2. The \texttt{checkAndUpdateEpisode()} method returns true only on episode start.
+
+\subsubsection{RuleStateTracker}
+
+\texttt{RuleStateTracker} tracks per-rule violation state. The method \texttt{updateState(ruleId, isViolatedNow)} returns true only on rising-edge transitions.
+
+\subsubsection{ResolutionEngine}
+
+\texttt{ResolutionEngine} executes external resolution scripts. It retrieves \texttt{ResolutionFilePath} and invokes it via \texttt{std::system()}. Exit code 0 indicates success.
+
+\subsubsection{EventQueue}
+
+\texttt{EventQueue} is a bounded FIFO buffer (capacity 1000) implemented with \texttt{std::deque} and \texttt{std::mutex}. It uses a drop-oldest policy.
+
+\subsubsection{IDataRepository}
+
+\texttt{IDataRepository} is an abstract interface decoupling components from \texttt{FormatterBlock}. It enables unit testing via mock implementations.
+
+\subsection{Data Model Implementation}
+
+The prototype defines its core data structures in \texttt{telemetry\_types.hpp}.
+
+TelemetryDefinition contains:
+\begin{itemize}
+\item \texttt{TelemetryName}
+\item \texttt{TelemetrySourceName}
+\item \texttt{TelemetryCategory}
+\item \texttt{TelemetryDescription}
+\item \texttt{TelemetryDataType}
+\end{itemize}
+
+TelemetrySampleDefinition contains:
+\begin{itemize}
+\item \texttt{TelemetrySourceName}
+\item \texttt{TelemetryName}
+\item \texttt{TelemetryTimestamp}
+\item \texttt{TelemetryValue}
+\end{itemize}
+
+RuleDefinition contains:
+\begin{itemize}
+\item \texttt{TelemetryName}
+\item \texttt{TelemetrySourceName}
+\item \texttt{RuleOperator}
+\item \texttt{RuleThreshold}
+\item \texttt{DependsOn}
+\item \texttt{Impacts}
+\item \texttt{ResolutionFilePath}
+\end{itemize}
+
+FaultStatus contains:
+\begin{itemize}
+\item \texttt{TelemetryID}
+\item \texttt{RuleID}
+\item \texttt{FaultSeverity}
+\item \texttt{FaultDetectedAt}
+\item \texttt{RootCauseTelemetryID}
+\item \texttt{IsSuppressed}
+\end{itemize}
+
+PersistentFaultData contains:
+\begin{itemize}
+\item \texttt{source}
+\item \texttt{metric}
+\item \texttt{timestamp}
+\item \texttt{rootCauseSource}
+\item \texttt{rootCauseMetric}
+\end{itemize}
+
+The YANG data model (\texttt{belden-prism-police@2099-12-31.yang}) defines configuration and operational state.
+
+\subsection{Data Flow and Control Flow}
+
+\subsubsection{Ingestion Paths}
+
+The prototype receives data through two paths:
+
+\begin{itemize}
+\item \gls{yang}/\gls{netconf} path via \texttt{netconfd-pro}
+\item Message bus path via topic \texttt{i/prism/telemetry}
+\end{itemize}
+
+Both paths converge at \texttt{InputBlock}.
+
+\subsubsection{Processing Pipeline}
+
+The main loop calls \texttt{FormatterBlock::processAllEvents()} every 100 ms using \texttt{std::this\_thread::sleep\_for()}.
+
+Processing phases:
+
+\begin{enumerate}
+\item Event dequeuing
+\item Event separation
+\item Configuration processing
+\item Sample bucketing
+\item Topological sort
+\item Timestamp sort
+\item Sample processing
+\end{enumerate}
+
+Core logic includes:
+
+\begin{enumerate}
+\item Store sample
+\item Decrement suppression
+\item Validate config if dirty
+\item Evaluate rules
+\item Check persistent faults
+\item Detect transitions
+\item Update episode
+\item Root cause + resolution + suppression
+\item Handle cleared rules
+\end{enumerate}
+
+Batch constraints:
+\begin{itemize}
+\item \texttt{kMaxBatchEvents = 100}
+\item \texttt{kMaxFlushAge = 1000ms}
+\end{itemize}
+
+\subsubsection{Dependency Graph Construction}
+
+Dependencies are declared in \texttt{RuleDefinition.DependsOn}. The method \texttt{rebuildAllDependencies()} constructs:
+
+\begin{itemize}
+\item \texttt{dependencies}
+\item \texttt{reverseDependencies}
+\end{itemize}
+
+\subsubsection{Root-Cause Traversal}
+
+Traversal uses DFS with visited set and follows \texttt{DependsOn} chains. Selection is greedy and order-dependent.
+
+\subsubsection{Transitive Impact Computation and Suppression}
+
+Impacts are computed via BFS over \texttt{reverseDependencies}. Suppression window is 60 samples.
+\subsection{Implementation Details}
+
+\subsubsection{Technology Stack}
+
+\begin{table}[htbp]
+\centering
+\caption{Technology stack}
+\label{tab:technology-stack}
+\begin{tabular}{p{4cm} p{9cm}}
+\toprule
+Technology & Role \\
+\midrule
+C++20 & Implementation language \\
+ZeroMQ (zmq) & Message bus communication \\
+\texttt{netconfd-pro} & \gls{yang}/\gls{netconf} configuration engine \\
+\gls{yang} & Configuration and operational state data model \\
+Boost.Test & Unit testing framework \\
+\texttt{std::system()} & Resolution script execution (fork + exec) \\
+\texttt{std::recursive\_mutex} & Thread-safe access to shared state \\
+\texttt{std::deque} & EventQueue backing store \\
+\texttt{std::variant} & Polymorphic telemetry value representation \\
+\texttt{bil\_log} & Platform-specific structured logging \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Concurrency Model}
+
+The prototype uses a single-threaded processing model for the \gls{fdir} pipeline. The main loop is the sole consumer of the \texttt{EventQueue}. Message bus callbacks from \texttt{PrismPoliceCallbacks} arrive asynchronously on platform threads and enqueue events into the thread-safe \texttt{EventQueue}. All \gls{fdir} processing is serialised through \texttt{processAllEvents()}.
+
+A \texttt{std::recursive\_mutex} protects shared state during configuration and sample processing phases. The recursive mutex is necessary because some internal methods (e.g., \texttt{validateAndEnableConfig()}) may be called both from the main processing path and from configuration commit callbacks.
+
+The processing pipeline minimises lock hold times through a snapshot-based approach: events are dequeued under lock into local copies (Phase 1), and subsequent processing operates on the local copies. Lock re-acquisition occurs only when writing results back to shared state (fault records, episode state, suppression counters).
+
+This model ensures that the framework's behaviour is determined by the order of events in the queue, not by thread scheduling decisions, supporting the determinism requirement (NFR2, NFR11).
+
+\subsubsection{Design Trade-Offs}
+
+Centralised state in FormatterBlock. All authoritative mutable state resides in \texttt{FormatterBlock}, which implements the \texttt{IDataRepository} interface. This creates a monolithic coordinator where all components depend on a single class. The trade-off is consistency over modularity: a distributed state model would require synchronisation mechanisms that add overhead and non-deterministic timing behaviour. For the prototype, the centralised model ensures that all state transitions are serialised and observable.
+
+Inline root-cause traversal. As noted in Section 6.2, root-cause analysis is implemented inline in \texttt{FormatterBlock} rather than delegated to the \texttt{DependencyAnalyzer} class. This reduces interface indirection but increases the coupling between \texttt{FormatterBlock} and the root-cause algorithm. The trade-off was made because the inline implementation requires direct access to \texttt{EpisodeManager} state that was not exposed through \texttt{IDataRepository}.
+
+Resolution via \texttt{std::system()}. Resolution scripts are executed through \texttt{std::system()}, which invokes \texttt{fork()} and \texttt{exec()} on the underlying platform. This is resource-intensive on embedded systems. No resource limits, timeouts, or sandboxing are applied to resolution scripts. A misbehaving script (infinite loop, excessive memory consumption) could affect router operation. This is an accepted implementation constraint; the conceptual design acknowledges this limitation in Section 5.7.1.
+
+\subsection{Testing Strategy}
+
+The prototype is validated through a structured unit test suite implemented using the Boost.Test framework. The test suite serves two purposes: verifying the correctness of individual components and establishing traceability between implemented behaviour and the functional and non-functional requirements defined in Section 5.2.
+
+\subsubsection{Test-Based Validation Approach}
+
+Each test case is identified by a unique test ID (T01--T47) and is mapped to one or more requirements. The test suite is organised into the following test files:
+
+\begin{table}[htbp]
+\centering
+\begin{tabular}{p{5cm} p{8cm}}
+\hline
+Test File & Scope \\
+\hline
+\texttt{requirements\_traceability\_test.cpp} & Primary requirements coverage (T01--T45) \\
+\texttt{comprehensive\_test.cpp} & End-to-end integration across all components \\
+\texttt{episode\_tracking\_test.cpp} & Episode lifecycle transitions \\
+\texttt{automatic\_resolution\_test.cpp} & Resolution execution and suppression \\
+\texttt{edge\_cases\_test.cpp} & Cycle detection, queue overflow, boundary conditions \\
+\texttt{concurrent\_processing\_test.cpp} & Thread safety under concurrent ingestion \\
+\texttt{multi\_rule\_test.cpp} & Multiple rules per telemetry source \\
+\texttt{real\_world\_demo\_test.cpp} & Multi-layer dependency scenarios \\
+\texttt{episode\_counting\_test.cpp} & Episode counter behaviour \\
+\texttt{extreme\_edge\_cases\_test.cpp} & Stress and boundary conditions \\
+\texttt{messagebus\_mock\_test.cpp} & Message bus abstraction and mocking \\
+\texttt{messagebus\_integration\_test.cpp} & End-to-end message bus communication path \\
+\texttt{north\_south\_east\_west\_test.cpp} & Configuration and data path integration \\
+\texttt{critical\_coverage\_test.cpp} & Validation of critical execution paths \\
+\hline
+\end{tabular}
+\caption{Test files and scope}
+\label{tab:test-files-scope}
+\end{table}
+
+Tests are compiled with the \texttt{UNIT\_TEST} preprocessor flag, which enables internal state accessors in \texttt{FormatterBlock} (e.g., \texttt{isTelemetryActive()}, \texttt{getEpisodeId()}, \texttt{getFault()}, \texttt{isSuppressed()}, \texttt{hasResolutionExecuted()}) without modifying the production interface.
+
+\subsubsection{Test Design Principles}
+
+The test suite follows three principles:
+
+First, each test case creates a fresh \texttt{FormatterBlock} and \texttt{InputBlock} instance via \texttt{FormatterBlock::resetIdsForTesting()}, ensuring test isolation. No shared state persists between test cases.
+
+Second, tests exercise the complete processing pipeline by submitting data through \texttt{InputBlock} and calling \texttt{formatter.flush()} to trigger synchronous processing, rather than testing internal methods directly. This ensures that tests validate the integrated behaviour of the system, not isolated implementation details.
+
+Third, tests verify observable state changes (episode IDs, active/inactive status, fault records, suppression flags, persistent fault entries) rather than internal implementation mechanics. This makes the test suite resilient to internal refactoring as long as the observable behaviour remains correct.
+
+[PLACEHOLDER: Use Case Diagram --- Test scenarios covering fault detection, episode lifecycle, dependency chain traversal, resolution execution, suppression, and persistent fault detection]
+
+\subsection{Test Traceability Matrix}
+
+Table 6.2 maps each requirement to the test cases that validate it. This matrix ensures that every functional and non-functional requirement defined in Section 5.2 is covered by at least one test case, and that the coverage relationship is explicit and auditable.
+
+\begin{table}[htbp]
+\centering
+\begin{tabular}{p{1.5cm} p{5cm} p{6cm}}
+\hline
+Requirement & Description & Test IDs \\
+\hline
+FR1 & Detect failure states & T01, T02, T30, T32, T35, T36, T37, T38, T39, T40, T41 \\
+FR2 & Model inter-layer dependencies & T03, T23, T24 \\
+FR3 & Determine root cause & T04, T05, T23, T24, T29 \\
+FR4 & Perform root-cause-directed resolution & T06, T15, T25, T27, T34 \\
+FR5 & Verify resolution outcome & T08, T09, T31 \\
+FR6 & Expose unresolved failures & T10 \\
+FR7 & Support configuration-driven behaviour & T11, T20 \\
+FR8 & Validate configuration & T12, T13, T33 \\
+NFR1 & Minimal impact on non-faulty components & T06, T23, T24, T25 \\
+NFR2 & Deterministic behaviour & T14, T37, T38, T39, T40, T41 \\
+NFR3 & Stability under persistent faults & T15, T34 \\
+NFR4 & Bounded resource usage & T16 \\
+NFR5 & Timely fault handling & T17 \\
+NFR6 & Observability & T10, T18 \\
+NFR7 & Scalability across service layers & T19 \\
+NFR8 & Configurability without code changes & T11, T20 \\
+NFR9 & Fault isolation & T21 \\
+NFR10 & Compatibility with operational workflows & T10 \\
+NFR11 & Thread-safe concurrent operation & T22, T30 \\
+\hline
+\end{tabular}
+\caption{Test traceability matrix}
+\label{tab:test-traceability-matrix}
+\end{table}
+
+\subsection{Test Specification}
+
+Table 6.3 provides the detailed test specification. For each test, the table lists the Boost.Test case name, the requirements verified, and the expected result that constitutes a pass.
+
+\begin{table}[htbp]
+\centering
+\scriptsize
+\caption{Detailed test specification}
+\label{tab:test-specification}
+\begin{tabular}{p{1.2cm} p{4.3cm} p{2.3cm} p{5.2cm} p{1.5cm}}
+\toprule
+Test ID & Boost.Test Case Name & Verifies & Expected Result & Result \\
+\midrule
+T01 & T01\_detect\_fault\_threshold\_crossing & FR1 & Below threshold: inactive; above threshold: active & Pass \\
+T02 & T02\_fault\_episode\_start\_and\_end & FR1 & Episode starts on violation, ends on recovery & Pass \\
+T03 & T03\_dependency\_graph\_representation & FR2 & Dependency edge stored and retrievable & Pass \\
+T04 & T04\_root\_cause\_deepest\_active\_selected & FR3 & Deepest active dependency selected as root cause & Pass \\
+T05 & T05\_root\_cause\_cycle\_handling & FR3 & Cycles terminate; root is one of cycle nodes & Pass \\
+T06 & T06\_resolution\_executes\_only\_for\_root\_cause & FR4, NFR1 & Only root cause resolves; dependent is suppressed & Pass \\
+T07 & T07\_suppression\_counter\_mechanics & Design helper & Suppression counter decrements correctly & Pass \\
+T08 & T08\_post\_resolution\_success\_clears\_tracking & FR5 & Recovery clears fault; no persistent fault & Pass \\
+T09 & T09\_post\_resolution\_persistent\_fault\_created & FR5 & Persistent violation creates persistent fault & Pass \\
+T10 & T10\_netconf\_operational\_state\_returns\_persistent\_fault & FR6 & Persistent fault available via NETCONF & Pass \\
+T11 & T11\_runtime\_configuration\_changes\_behavior & FR7, NFR8 & Config changes alter behaviour & Pass \\
+T12 & T12\_invalid\_dependency\_rule\_is\_disabled & FR8 & Invalid dependency disables rule & Pass \\
+T13 & T13\_dirty\_config\_reject\_or\_graceful\_degrade & FR8 & No crash; system continues & Pass \\
+T14 & T14\_replay\_stream\_is\_deterministic & NFR2 & Identical input $\rightarrow$ identical output & Pass \\
+T15 & T15\_single\_resolution\_per\_episode & NFR3 & One resolution per episode & Pass \\
+T16 & T16\_tracking\_structures\_do\_not\_grow\_unbounded & NFR4 & Requires profiling (not executed) & Not Tested \\
+T17 & T17\_reaction\_time\_within\_bounds & NFR5 & Requires production timing validation & Not Tested \\
+T18 & T18\_logging\_contains\_key\_events & NFR6 & Requires log capture infra & Not Tested \\
+T19 & T19\_supports\_50\_rules\_10\_layers & NFR7 & $\geq$10 layers, $\geq$50 rules supported & Pass \\
+T20 & T20\_config\_only\_add\_new\_layer\_metric & NFR8 & Config-only extension works & Pass \\
+T21 & T21\_resolution\_failure\_does\_not\_stop\_monitoring & NFR9 & Monitoring continues after failure & Pass \\
+T22 & T22\_concurrent\_sample\_ingestion\_thread\_safe & NFR11 & No crash/race under concurrency & Pass \\
+T23 & T23\_four\_layer\_dependency\_chain\_rca & FR2, FR3 & Deepest fault selected & Pass \\
+T24 & T24\_partial\_chain\_failure & FR3, FR4 & Correct root cause when partial chain fails & Pass \\
+T25 & T25\_suppression\_uses\_impacts\_list & FR4, NFR1 & Only Impacts suppressed & Pass \\
+T26 & T26\_per\_telemetry\_timestamp\_ordering & Design & Timestamp ordering enforced & Pass \\
+T27 & T27\_resolution\_script\_exit\_codes & FR4 & Exit code 0 $\rightarrow$ resolution executed & Pass \\
+T28 & T28\_suppression\_per\_sample\_not\_time & Design, NFR3 & Sample-based suppression & Pass \\
+T29 & T29\_root\_cause\_recomputation & FR3 & Root cause updates dynamically & Pass \\
+T30 & T30\_per\_telemetry\_episodes & FR1 & Independent episode tracking & Pass \\
+T31 & T31\_persistent\_fault\_confirming\_timestamp & FR5 & Timestamp matches confirming sample & Pass \\
+T32 & T32\_multiple\_rules\_or\_logic & FR1 & OR logic across rules & Pass \\
+T33 & T33\_lazy\_config\_validation & FR8 & Validation before first evaluation & Pass \\
+T34 & T34\_resolved\_episodes\_deduplication & FR4, NFR3 & No duplicate resolution per episode & Pass \\
+T35 & T35\_noise\_near\_threshold & FR1 & New episode on re-crossing & Pass \\
+T36 & T36\_different\_sampling\_rates & FR1 & Independent detection maintained & Pass \\
+T37 & T37\_timestamp\_ordering\_determinism & NFR2 & Deterministic ordering & Pass \\
+T38 & T38\_timestamp\_ordering\_drop\_late & Ordering & Late samples dropped correctly & Pass \\
+T39 & T39\_drop\_late\_after\_accept & Ordering & Late clear ignored & Pass \\
+T40 & T40\_equal\_timestamps\_stable & Stability & Deterministic outcome & Pass \\
+T41 & T41\_multi\_telemetry\_independent\_order & Ordering & Independent ordering per telemetry & Pass \\
+T42 & T42\_sample\_without\_telemetry\_def & Basic & Ignored safely & Pass \\
+T43 & T43\_sample\_without\_rule\_def & Basic & Stored, no detection & Pass \\
+T44 & T44\_late\_arrival\_with\_system\_delay & Basic & Late sample dropped & Pass \\
+T45 & T45\_real\_world\_multi\_rate\_with\_delays\_rca\_resolution & FR1--FR5, NFR1 & Full chain scenario behaves correctly & Pass \\
+T46 & Callback\_Direct\_Sample\_Processing & Integration & Callback ingestion + north-south path & Pass \\
+T47 & Callback\_Rule\_Violation\_Via\_Input & Integration & Callback rule violation + east-west path & Pass \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Limitations of the Prototype}
+
+This section documents the features defined in the conceptual design (Chapter 5) that are not implemented in the prototype, as well as implementation constraints that affect the prototype's applicability.
+
+\subsubsection{Features Not Implemented}
+
+Graduated severity assignment. All detected faults are assigned \texttt{Severity::Critical}. The six-level severity enum is defined but not used for differentiated fault classification or recovery selection (Section 5.4.3).
+
+Resolution script resource limits. No timeouts, memory limits, or sandboxing are applied to resolution script execution (Section 5.7.1).
+
+Recovery retry or alternative strategies. Resolution executes at most once per episode. If the script fails, no retry or alternative recovery is attempted instead reported as persistent fault (Section 5.6.4).
+
+Configuration rollback. No mechanism exists to roll back to a previous configuration state.
+
+\subsection{Summary}
+
+This chapter described the prototype implementation of the stateful \gls{fdir} framework on the Belden/Hirschmann PRISM industrial router platform. The prototype realises the seven conceptual components defined in Section 5.8.1 as C++20 classes, integrated through the \texttt{IDataRepository} interface and coordinated by \texttt{FormatterBlock} as the central facade. Two platform integration layers (\texttt{PrismPoliceCallbacks}, \texttt{PrismPoliceConfigCache}) bridge the PRISM platform's ZeroMQ message bus and \gls{yang}/\gls{netconf} configuration engine to the framework's internal data model.
+
+The seven-phase processing pipeline defined in Section 5.8.2 is implemented in FormatterBlock::processAllEvents(), invoked at from the main loop. The pipeline processes configuration events before sample events, sorts samples in dependency-topological then timestamp order, evaluates rules, tracks episode lifecycles, performs root-cause analysis, executes resolution scripts, and applies transitive suppression to downstream impacts.
+
+A structured test suite of 47 test cases plus diamond dependency tests validates the prototype against all eight functional requirements (FR1--FR8) and ten of eleven non-functional requirements (NFR1--NFR3, NFR5--NFR11). NFR4 (bounded resource usage) is partially addressed through a placeholder test that requires memory profiling for complete validation. Two integration tests (T46, T47) additionally verify the platform callback interface, covering both the north-south configuration path and the east-west message bus communication path. The test traceability matrix (Table 6.2) and test specification (Table 6.3) establish a traceable link between implemented tests and requirements, supporting the evaluation in Chapter 7.
+
+The following chapter evaluates the prototype against the requirements and research questions, using the test results and scenario-based analysis to assess the framework's correctness, determinism, and suitability for industrial router deployment.

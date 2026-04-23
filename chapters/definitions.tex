@@ -1,0 +1,28 @@
+\begin{definition}[Fault Episode]
+A fault episode denotes a continuous time interval during which a fault condition persists, beginning with the first detected violation of a rule and ending when the system returns to a compliant state. In contrast to stateless alarms, a fault episode is treated as a stateful runtime entity that governs recovery execution, ensuring that corrective actions are triggered at most once per episode.
+\end{definition}
+
+\begin{definition}[Determinism (Industrial Routers)]
+Determinism in this thesis refers to four properties:
+(i) deterministic decision logic, where identical inputs produce identical outcomes;
+(ii) deterministic processing order, where single-threaded execution ensures a reproducible and analysable sequence of operations;
+(iii) deterministic recovery sequencing that avoids race conditions and oscillations; and
+(iv) deterministic network behaviour, ensuring that fault management activities do not disrupt forwarding-plane guarantees.
+The forwarding plane is the router's data-path subsystem responsible for packet forwarding, routing table lookups, and network address translation.
+\end{definition}
+
+\begin{definition}[Rising-Edge Detection]
+The mechanism by which the framework triggers downstream processing (episode creation, root-cause analysis, resolution) only on the transition from a healthy state to a violated state, not on repeated observations of an ongoing violation.
+\end{definition}
+
+\begin{definition}[Suppression Window]
+A fixed number of telemetry samples (default: 60) during which a downstream telemetry source is suppressed after a root-cause resolution has been executed. During suppression, newly detected faults are recorded but do not trigger resolution actions.
+\end{definition}
+
+\begin{definition}[Resolved-Episodes Set]
+A runtime data structure that records $(telemetryId, episodeId)$ pairs for which resolution has already been executed, enforcing the at-most-once resolution guarantee per fault episode.
+\end{definition}
+
+\begin{definition}[Transitive Impact Set]
+The full set of downstream telemetry sources reachable via breadth-first traversal of the reverse dependency graph from a root-cause telemetry source. All telemetries in this set are suppressed after root-cause resolution.
+\end{definition}
