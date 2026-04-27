@@ -278,7 +278,7 @@ Only the healthy-to-violated transition triggers downstream processing (episode 
 
 \subsection{Fault Record Creation}
 
-When a rule transitions from healthy to violated, the fault detector creates a fault record containing:
+When a rule transitions from healthy $\rightarrow$ violated, the fault detector creates a fault record containing:
 
 \begin{itemize}
 \item The telemetry ID and rule ID that produced the fault.
@@ -290,13 +290,13 @@ When a rule transitions from healthy to violated, the fault detector creates a f
 
 If the telemetry is currently suppressed (Section 5.7), the fault record is created with the suppression flag set to true. Suppressed faults are recorded for observability (NFR6) but do not trigger resolution actions, preventing redundant recovery during the post-resolution observation window.
 
-\textbf{Limitation:} In the current design, all detected faults are assigned a uniform severity level. The severity enum defines multiple levels (Healthy, Warning, Critical, NonCritical, Degraded, Failed), but the detection mechanism does not differentiate between them based on threshold proximity, violation duration, or other criteria. This means that the graduated severity model proposed in \cite{ref1} where severity directly governs recovery action selection is not realised. Severity-based recovery differentiation remains an open extension point.
+\textbf{Limitation:} In the current design, all detected faults are assigned a uniform severity level. The severity defines multiple levels (Healthy, Warning, Critical, NonCritical, Degraded, Failed), but the detection mechanism does not differentiate between them based on threshold proximity, violation duration, or other criteria. This means that the graduated severity model proposed in \cite{ref1} where severity directly governs recovery action selection is not realised. Severity-based recovery differentiation remains an open extension point.
 
 \subsection{Suppression-Aware Detection}
 
 The framework checks the suppression state of each telemetry before processing newly violated rules. If a telemetry is suppressed, newly detected faults are marked as suppressed and do not enter the resolution pipeline. This mechanism prevents the framework from attempting to resolve faults that are expected to clear as a consequence of an upstream resolution that has already been executed.
 
-The suppression counter is decremented on every incoming sample for the suppressed telemetry, regardless of whether the sample triggers a violation. This ensures that suppression windows are tied to actual data arrival rather than wall-clock time, which is appropriate for embedded systems where sample rates may vary and where the arrival of new data is the natural indicator that the system has had an opportunity to recover.
+Each suppressed telemetry is assigned a suppression counter an integer initialised to a fixed number of samples (default: 60) when suppression begins (Section 5.7.3). This counter is decremented by one on every incoming sample for the suppressed telemetry, regardless of whether the sample triggers a violation. When the counter reaches zero, suppression is lifted: subsequent violations for that telemetry are treated as new, independent faults and enter the normal detection analysis resolution pipeline. This ensures that suppression windows are tied to actual data arrival rather than wall-clock time, which is appropriate for embedded systems where sample rates may vary and where the arrival of new data is the natural indicator that the system has had an opportunity to recover.
 
 \section{Service Dependency Model (RQ3)}
 
@@ -330,13 +330,13 @@ Limitation: The dependency model does not distinguish between different types of
 
 \subsection{Dependency-Ordered Sample Processing}
 
-A key design decision in the framework is that telemetry samples are not processed in arrival order but in dependency order. When multiple samples arrive in a processing batch, the framework performs a topological sort of the affected telemetry IDs based on the dependency graph before evaluating rules.
+Design decision: Telemetry samples are not processed in arrival order but in dependency order. When multiple samples arrive in a processing batch, the framework performs a topological sort of the affected telemetry IDs based on the dependency graph before evaluating rules. The sort operates on a local snapshot of already-dequeued events; new samples continue to be received and enqueued concurrently via the bounded event queue (Section 5.8.1) and are processed in the next cycle.
 
 This ensures that upstream telemetry is evaluated before downstream telemetry within the same processing cycle. The consequence is that when a root cause fault and its downstream symptoms arrive simultaneously, the root cause is detected first, enabling accurate dependency classification of the downstream faults. This ordering principle is motivated by the propagation direction insight from Liu et al.\ \cite{ref27}, who demonstrate that direction-aware traversal (processing upstream before downstream for error-count anomalies) bounds the search space during fault localisation.
 
 The topological sort uses a depth-first traversal with cycle detection. If a cycle is detected in the dependency graph ($A$ depends on $B$, $B$ depends on $A$), the cycle is broken by treating the first-visited node as the traversal boundary, preventing infinite recursion. Within each topological level, samples are further sorted by timestamp to ensure deterministic processing order (Principle 2).
 
-Limitation: The cycle-handling strategy silently breaks cycles rather than reporting them as configuration errors. In a cyclic dependency, the processing order depends on which node is visited first during the DFS traversal, which is determined by the iteration order of the internal data structure. While the result is deterministic for a given configuration, it is not explicitly controllable by the operator. To ensure fully deterministic cycle-breaking independent of internal data structure ordering, adjacency lists should be sorted by telemetry ID before traversal. The prototype does not implement this sorting. A future extension could validate the dependency graph for acyclicity at configuration time and reject cyclic declarations.
+Limitation: The cycle-handling strategy breaks cycles during traversal rather than rejecting them as configuration errors at configuration time. When a cycle is detected, the back-edge node is skipped and the cycle is logged as a warning to ensure operator visibility (NFR6). However, the processing order within a cycle depends on which node is visited first during the DFS traversal, which is determined by the iteration order of the internal data structure. While the result is deterministic for a given configuration, it is not explicitly controllable by the operator. To ensure fully deterministic cycle- breaking independent of internal data structure ordering, adjacency lists should be sorted by telemetry ID before traversal. The prototype does not implement this sorting. A future extension could additionally validate the dependency graph for acyclicity at configuration time and reject cyclic declarations.
 
 \subsection{Root Cause Analysis}
 
@@ -394,7 +394,7 @@ The episode lifecycle is governed by the active rule count for each telemetry ID
 
 \textbf{Episode End.} When the active rule count for a telemetry ID transitions from a positive value to zero (all rules have returned to healthy), the episode ends. The telemetry is marked as inactive. Any subsequent violation will start a new episode with a new episode ID.
 
-This state lifecycle (inactive $\rightarrow$ active $\rightarrow$ inactive) is deliberately constrained compared to multi-state models found in some self-healing frameworks such as \cite{ref19}, which uses HMM-based state estimation, or \cite{ref21}, which decomposes self-healing into monitor--diagnose--plan--enact phases with feedback calibration. The constraint is a design choice driven by the determinism and resource requirements of industrial routers (Principle 2, Principle 5): fewer states mean fewer transitions to validate, fewer edge cases to handle, and more predictable behaviour under all conditions. Whether this reduced state space is sufficient for all industrial router fault scenarios is an empirical question addressed in the evaluation (Chapter 7).
+This state lifecycle (inactive $\rightarrow$ active $\rightarrow$ inactive) is deliberately constrained compared to multi-state models found in some self-healing frameworks such as \cite{ref19}, which uses HMM-based state estimation, or \cite{ref21}, which decomposes self-healing into monitor--diagnose--plan--enact phases with feedback calibration. The constraint is a design choice driven by the determinism and resource requirements of industrial routers (Principle 2, Principle 5): fewer states mean fewer transitions to validate, fewer edge cases to handle, and more predictable behaviour under all conditions. Whether this reduced state space is sufficient for all industrial router fault scenarios is an empirical question addressed in the evaluation (Chapter 7). Figure extends this two-state episode lifecycle with two additional states Resolved and Persistent that represent the outcome of resolution execution (Section 5.6.3) and the detection of faults that persist after resolution (Section 5.6.4). The episode lifecycle itself remains governed by two states (Inactive and Active); Resolved and Persistent are resolution-outcome states that refine the Active state rather than introducing additional episode transitions.
 
 \begin{figure}[htbp]
   \centering
@@ -402,6 +402,8 @@ This state lifecycle (inactive $\rightarrow$ active $\rightarrow$ inactive) is d
   \caption{Fault episode lifecycle state machine}
   \label{fig:fault-episode-lifecycle-state-machine}
 \end{figure}
+
+The Persistent state is not a loop: the at-most-once resolution guarantee (Section 5.6.3) prevents re-execution of the resolution script within the same episode. Once a fault is classified as persistent, the framework records it and exposes it through the YANG operational state model as read-only data, signalling to external management systems that automated resolution was insufficient and manual intervention is required. The episode remains in the Persistent state until all associated rules return to a healthy state, at which point the episode ends and the telemetry transitions to Inactive. If the same fault recurs after the episode has ended, a new episode begins and resolution is permitted again.
 
 \subsection{At-Most-Once Resolution Guarantee}
 
@@ -423,7 +425,7 @@ Because episode IDs are monotonically increasing and never reused, entries in th
 
 \subsection{Persistent Fault Detection}
 
-A fault is classified as persistent if it remains in a violated state after a resolution has been executed for it. The framework detects this condition by tracking which rules have had resolution executed. On each subsequent sample, if a rule that has previously been resolved is still violated, the framework records a persistent fault entry containing:
+A fault is classified as persistent if it remains in a violated state on the next telemetry sample received after a resolution has been executed for it. There is no configurable grace period: the check occurs on the first post-resolution sample for the affected telemetry. This detection timing is not configurable through the YANG model in the current design. A configurable post-resolution observation window specifying how many samples must remain violated before escalation would reduce false persistent-fault classifications in cases where the resolution effect requires multiple sample intervals to propagate, but is not implemented in the current framework.The framework detects this condition by tracking which rules have had resolution executed. On each subsequent sample, if a rule that has previously been resolved is still violated, the framework records a persistent fault entry containing:
 
 \begin{itemize}
 \item The source and metric of the faulted telemetry.
@@ -477,7 +479,7 @@ After a resolution is executed for a root cause, all telemetries in the transiti
 \item When the counter reaches zero, suppression is lifted. If the fault persists, it is treated as a new, independent fault and enters the normal detection-analysis-resolution pipeline.
 \end{itemize}
 
-The use of sample counts rather than wall-clock time for suppression windows is a deliberate design choice for embedded systems. In industrial routers, telemetry sample rates may vary depending on system load, network conditions, or service configuration. A sample-count-based window ensures that suppression duration is proportional to actual system activity: if samples arrive slowly (indicating a lightly loaded system), suppression lasts longer in wall-clock time, giving the system more time to recover. If samples arrive rapidly, suppression expires sooner, enabling faster re-evaluation. This adaptive behaviour emerges naturally from the sample-count mechanism without requiring explicit timer management or clock synchronisation.
+The use of sample counts rather than wall-clock time for suppression windows is a deliberate design choice for embedded systems. In industrial routers, telemetry sample rates may vary depending on system load, network conditions, or service configuration.  A sample-count-based window ensures that suppression duration is proportional to actual system activity rather than elapsed time: the suppression window always spans exactly the configured number of samples, regardless of how much wall-clock time elapses between them. If samples arrive slowly, the system has more wall-clock time between samples to complete recovery before the window expires. If samples arrive rapidly, the window expires in less wall-clock time, enabling faster re-evaluation. In both cases, the framework evaluates exactly the same number of post-resolution observations before deciding whether the downstream fault has cleared. This adaptive behaviour emerges naturally from the sample-count mechanism without requiring explicit timer management or clock synchronisation.
 
 \subsection{Resolution Safeguards}
 
