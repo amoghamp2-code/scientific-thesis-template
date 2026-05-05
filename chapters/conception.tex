@@ -350,7 +350,7 @@ When a new fault is detected (a rule transitions from healthy to violated and th
 \item A visited set prevents infinite recursion in the presence of dependency cycles.
 \end{enumerate}
 
-The root cause telemetry ID is recorded in the fault record, enabling the resolution engine to execute recovery for the root cause rather than for the symptom. This traversal implements the principle established in \cite{ref7,ref8} that fault management must target propagation sources rather than downstream manifestations.
+The root cause telemetry ID is recorded in the fault record, enabling the resolution engine to execute recovery for the root cause rather than for the symptom. This traversal implements the principle established in \cite{ref7,ref8} that fault management must target propagation sources rather than downstream manifestations. Figure~\ref{fig:root-cause-analysis} illustrates this traversal for a diamond dependency topology.
 
 \begin{figure}[htbp]
   \centering
@@ -394,7 +394,7 @@ The episode lifecycle is governed by the active rule count for each telemetry ID
 
 \textbf{Episode End.} When the active rule count for a telemetry ID transitions from a positive value to zero (all rules have returned to healthy), the episode ends. The telemetry is marked as inactive. Any subsequent violation will start a new episode with a new episode ID.
 
-This state lifecycle (inactive $\rightarrow$ active $\rightarrow$ inactive) is deliberately constrained compared to multi-state models found in some self-healing frameworks such as \cite{ref19}, which uses HMM-based state estimation, or \cite{ref21}, which decomposes self-healing into monitor--diagnose--plan--enact phases with feedback calibration. The constraint is a design choice driven by the determinism and resource requirements of industrial routers (Principle 2, Principle 5): fewer states mean fewer transitions to validate, fewer edge cases to handle, and more predictable behaviour under all conditions. Whether this reduced state space is sufficient for all industrial router fault scenarios is an empirical question addressed in the evaluation (Chapter~\ref{chap:evaluation}). Figure extends this two-state episode lifecycle with two additional states Resolved and Persistent that represent the outcome of resolution execution (Section~\ref{sec:at-most-once}) and the detection of faults that persist after resolution (Section~\ref{sec:persistent-fault-detection}). The episode lifecycle itself remains governed by two states (Inactive and Active); Resolved and Persistent are resolution-outcome states that refine the Active state rather than introducing additional episode transitions.
+This state lifecycle (inactive $\rightarrow$ active $\rightarrow$ inactive) is deliberately constrained compared to multi-state models found in some self-healing frameworks such as \cite{ref19}, which uses HMM-based state estimation, or \cite{ref21}, which decomposes self-healing into monitor--diagnose--plan--enact phases with feedback calibration. The constraint is a design choice driven by the determinism and resource requirements of industrial routers (Principle 2, Principle 5): fewer states mean fewer transitions to validate, fewer edge cases to handle, and more predictable behaviour under all conditions. Whether this reduced state space is sufficient for all industrial router fault scenarios is an empirical question addressed in the evaluation (Chapter~\ref{chap:evaluation}). Figure~\ref{fig:fault-episode-lifecycle-state-machine} extends this two-state episode lifecycle with two additional states Resolved and Persistent that represent the outcome of resolution execution (Section~\ref{sec:at-most-once}) and the detection of faults that persist after resolution (Section~\ref{sec:persistent-fault-detection}). The episode lifecycle itself remains governed by two states (Inactive and Active); Resolved and Persistent are resolution-outcome states that refine the Active state rather than introducing additional episode transitions.
 
 \begin{figure}[htbp]
   \centering
@@ -569,6 +569,8 @@ For each telemetry ID in topological order, and for each sample in timestamp ord
 \end{enumerate}
 \item For cleared rules: remove fault records, decrement active rule count, check for episode end.
 \end{enumerate}
+
+Figure~\ref{fig:sample-processing-flow} illustrates this processing flow.
 
 \begin{figure}[htbp]
   \centering

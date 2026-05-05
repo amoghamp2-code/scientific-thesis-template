@@ -189,6 +189,8 @@ Prism-police's memory growth from E0 to E3-1000 is 15.45 MB. The bounded event q
 
 The memory data shows that prism-police's memory consumption ranges from 13.92~MB (E0, idle) to 29.37~MB (E3-1000, maximum tested load). For context, a representative embedded industrial router platform provides 256~MB of RAM, of which the operating system and other services consume a portion. Prism-police's peak measured consumption of 29.37~MB represents approximately 11.5\% of a 256~MB memory budget, leaving substantial headroom for other platform services. However, the test T16 (NFR4 --- bounded resource usage) is a placeholder in the current test suite and does not verify that memory consumption remains bounded over extended operational periods (days or weeks). The 2.1\texttimes{} growth factor under storm conditions indicates that memory usage is correlated with the number of concurrently active telemetry sources. Whether this growth remains bounded over time --- particularly whether the monotonically growing \texttt{resolvedEpisodes} set and \texttt{persistentFaults} vector cause unbounded accumulation during long-duration operation --- requires soak testing not performed in this evaluation. Implementing the episode-end pruning mechanism defined in Section~\ref{sec:at-most-once} would bound these structures and is identified as a necessary optimisation for production deployment.
 
+Figure~\ref{fig:quantitative-comparison} summarises the CPU and memory utilisation across all scenarios.
+
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.8\textwidth]{quantitative_comparison_bar_chart.png}
