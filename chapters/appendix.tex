@@ -20,12 +20,7 @@ This section consolidates all limitations identified across the conception (Chap
 
 \begin{enumerate}
 \item The framework cannot monitor the infrastructure (message bus, \gls{netconf}) on which it depends (Section~\ref{sec:chosen-approach}).
-\item Rule evaluation is limited to single-threshold comparisons on individual metrics (Section~\ref{sec:rule-evaluation}).
 \item The dependency model does not distinguish dependency types or conditional propagation (Section~\ref{sec:dependency-graph-structure}).
-\item Cycle handling in the dependency graph is implicit rather than configurable (Section~\ref{sec:dependency-ordered-processing}).
-\item Cross-metric correlation is not supported within the rule evaluation mechanism (Section~\ref{sec:bounded-resource-design}).
-\item All detected faults are assigned a uniform severity level (Section~\ref{sec:fault-record-creation}).
-\item No automated retry or alternative recovery strategies for persistent faults (Section~\ref{sec:persistent-fault-detection}).
 \item Resolution scripts have no resource limits, timeouts, or sandboxing (Section~\ref{sec:resolution-execution}).
 \end{enumerate}
 
