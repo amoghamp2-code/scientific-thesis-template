@@ -12,7 +12,7 @@ The framework's conceptual architecture is designed to be platform-independent: 
 
 \section{Answers to Research Questions}\label{sec:rq-answers}
 
-The following provides condensed answers to each research question. Detailed evidence and test references are provided in Section~\ref{sec:rq-evaluation}.
+The following provides condensed answers to each research question. Detailed evidence and test references are provided in Section~\ref{sec:rq-evaluation}. An expanded mapping with full traceability is available in Appendix~\ref{sec:appendix-rq-evidence}.
 
 \textbf{RQ1 (Fault characterisation):} The framework characterises faults through threshold-based rule evaluation with rising-edge detection that distinguishes new violations from ongoing observations (Section~\ref{sec:rule-based-detection}). Detection correctness is verified across all evaluation scenarios (E1--E3) and by 11 unit tests. The characterisation is limited to single-threshold float comparisons; multi-condition rules and graduated severity are not implemented. The conceptual design includes a six-level severity model, but the prototype assigns all faults uniformly as Critical. Severity-differentiated recovery selection remains an open extension point.
 
@@ -26,7 +26,7 @@ The following provides condensed answers to each research question. Detailed evi
 
 \section{Limitations}\label{sec:conclusion-limitations}
 
-The following limitations apply to the thesis as a whole, consolidated from the conception (Section~\ref{sec:conception-summary}), prototype (Section~\ref{sec:impl-limitations}), and evaluation (Section~\ref{sec:eval-limitations}):
+The following limitations apply to the thesis as a whole, consolidated from the conception (Section~\ref{sec:conception-summary}), prototype (Section~\ref{sec:impl-limitations}), and evaluation (Section~\ref{sec:eval-limitations}). A complete categorised list is provided in Appendix~\ref{sec:appendix-limitations}.
 
 \begin{enumerate}
 \item Single-platform validation. The prototype is implemented and evaluated exclusively on the Belden/Hirschmann PRISM platform. Cross-platform applicability is a design property (declarative configuration, no hardcoded service logic) but has not been empirically demonstrated on other router platforms.

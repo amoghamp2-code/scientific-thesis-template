@@ -1,0 +1,51 @@
+\section{Detailed Research Question Evidence}\label{sec:appendix-rq-evidence}
+
+This section provides the detailed mapping of evaluation evidence to each research question, expanding on the condensed answers presented in Section~\ref{sec:rq-answers}.
+
+\textbf{RQ1 (Fault characterisation):} The framework characterises faults through threshold-based rule evaluation with rising-edge detection that distinguishes new violations from ongoing observations (Section~\ref{sec:rule-based-detection}). Detection correctness is verified across all evaluation scenarios (E1, E2, E3) and by 11 unit tests (T01, T02, T30, T32, T35--T41). The characterisation is limited to single-threshold float comparisons; multi-condition rules and graduated severity are not implemented. The conceptual design includes a six-level severity model (Section~\ref{sec:fault-record-creation}), but the prototype assigns all faults uniformly as Critical. Severity-differentiated recovery selection remains an open extension point.
+
+\textbf{RQ2 (Telemetry model):} Telemetry is organised into definitions, rules, and samples delivered through \gls{yang}/\gls{netconf} and the message bus (Section~\ref{sec:telemetry-model}). A bounded event queue and sample-driven processing ensure resource-bounded operation, with memory consumption between 13.92 and 29.37~MB across all tested scenarios (Table~\ref{tab:memory-utilisation}). Long-duration resource verification remains open (NFR4 partially validated).
+
+\textbf{RQ3 (Dependency representation):} Dependencies are represented as a directed graph with forward edges for root-cause traversal and reverse edges for transitive impact computation (Section~\ref{sec:dependency-model}). Correct root-cause identification is demonstrated across linear chains (T04), four-layer chains (T23), partial chains (T24), cyclic graphs (T05), and diamond topologies. The model is static and does not distinguish dependency types (Section~\ref{sec:dependency-graph-structure}).
+
+\textbf{RQ4 (Recovery coordination):} Episode-aware gating enforces at-most-once resolution per episode (Section~\ref{sec:at-most-once}), root-cause-only execution prevents cascading recovery (Section~\ref{sec:root-cause-only}), and transitive suppression prevents redundant downstream actions (Section~\ref{sec:sample-count-suppression}). The E1 and E2 scenarios confirm single-resolution behaviour under sustained and cascading fault conditions. Unit tests T06, T15, T21, T25, T27, and T34 verify the recovery coordination mechanisms. Recovery retry and alternative strategies are not implemented (Section~\ref{sec:impl-limitations}).
+
+\textbf{RQ5 (Integrated architecture):} The seven-component, seven-phase processing pipeline unifies detection, dependency reasoning, episode tracking, and recovery coordination into a single runtime system (Section~\ref{sec:integrated-architecture}). Test T45 verifies the complete pipeline end-to-end with a four-layer chain under realistic multi-rate sampling conditions. The qualitative comparison (Table~\ref{tab:qualitative-comparison}) confirms that this integration is absent in both Prometheus and Nagios.
+
+\section{Consolidated Limitations}\label{sec:appendix-limitations}
+
+This section consolidates all limitations identified across the conception (Chapter~\ref{chap:conception}), prototype (Chapter~\ref{chap:implementation}), and evaluation (Chapter~\ref{chap:evaluation}).
+
+\subsection*{Conceptual Limitations}
+
+\begin{enumerate}
+\item The framework cannot monitor the infrastructure (message bus, \gls{netconf}) on which it depends (Section~\ref{sec:chosen-approach}).
+\item Rule evaluation is limited to single-threshold comparisons on individual metrics (Section~\ref{sec:rule-evaluation}).
+\item The dependency model does not distinguish dependency types or conditional propagation (Section~\ref{sec:dependency-graph-structure}).
+\item Cycle handling in the dependency graph is implicit rather than configurable (Section~\ref{sec:dependency-ordered-processing}).
+\item Cross-metric correlation is not supported within the rule evaluation mechanism (Section~\ref{sec:bounded-resource-design}).
+\item All detected faults are assigned a uniform severity level (Section~\ref{sec:fault-record-creation}).
+\item No automated retry or alternative recovery strategies for persistent faults (Section~\ref{sec:persistent-fault-detection}).
+\item Resolution scripts have no resource limits, timeouts, or sandboxing (Section~\ref{sec:resolution-execution}).
+\end{enumerate}
+
+\subsection*{Prototype Limitations}
+
+\begin{enumerate}
+\item Threshold comparison implemented only for float values; integer, boolean, and string comparisons not supported.
+\item The \texttt{resolvedEpisodes} set and \texttt{persistentFaults} vector grow monotonically because episode-end pruning is not implemented.
+\item Graduated severity assignment not realised; all faults receive \texttt{Severity::Critical}.
+\item No configuration rollback mechanism within the framework.
+\item No operator dashboard or graphical interface.
+\end{enumerate}
+
+\subsection*{Evaluation Limitations}
+
+\begin{enumerate}
+\item No production-platform evaluation. All experiments conducted on desktop-class hardware in Docker containers.
+\item NFR4 (bounded resource usage) not fully validated over extended operational periods.
+\item NFR5 (timely fault handling) not validated under production conditions.
+\item Single-run measurements without statistical repetition.
+\item Synthetic fault scenarios only; real-world fault patterns not tested.
+\item No combined deployment evaluation (prism-police alongside a monitoring tool).
+\end{enumerate}
