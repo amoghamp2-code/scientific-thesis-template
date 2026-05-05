@@ -529,3 +529,5 @@ $RECYCLE.BIN/
 *.lnk
 
 # End of https://www.toptal.com/developers/gitignore/api/emacs,latex,linux,macos,jabref,windows,libreoffice,microsoftoffice,visualstudiocode
+main-english.glg-abr
+main-english.gls-abr
