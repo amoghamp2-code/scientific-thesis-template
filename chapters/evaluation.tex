@@ -41,7 +41,7 @@ The prototype (\texttt{prism-police}) was deployed in a Docker container that re
 
 Prometheus (0.32.0) and Nagios (4.5.12) were deployed in the same Docker-based environment with equivalent monitoring configurations: the same telemetry sources, the same threshold rules, and the same fault injection sequences. All three systems received identical telemetry streams during each experiment. The specific versions of Prometheus (0.32.0) and Nagios (4.5.12) were recorded during the experiments, which gives exact reproducibility of the comparison.
 
-Limitation: The Docker-based deployment introduces containerisation overhead (network namespacing, filesystem layering) that affects all three systems equally. The measurements reflect containerised performance, not bare-metal performance.
+\textbf{Limitation:} The Docker-based deployment introduces containerisation overhead (network namespacing, filesystem layering) that affects all three systems equally. The measurements reflect containerised performance, not bare-metal performance.
 \subsubsection{Measurement Methodology}
 
 Resource consumption and alert volume were measured using operating system interfaces on the Linux-based experiment host. The measurement tools and methods differ by system due to their different deployment models:
