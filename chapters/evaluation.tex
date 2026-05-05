@@ -194,7 +194,7 @@ Figure~\ref{fig:quantitative-comparison} summarises the CPU and memory utilisati
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=0.8\textwidth]{quantitative_comparison_bar_chart.png}
-\caption{Bar graph quantitative comparison of CPU and memory utilisation}
+\caption{Bar graph quantitative comparison of alert volume and CPU utilisation}
 \label{fig:quantitative-comparison}
 \end{figure}
 
@@ -255,7 +255,7 @@ FR8 & Validated & T12, T13, T33 \\
 NFR1 & Validated & T06, T23, T24, T25; E2 \\
 NFR2 & Validated & T14, T37--T41 \\
 NFR3 & Validated & T15, T34; E1 \\
-NFR4 & Partially validated & Memory evaluation (Table~7.3); T16 placeholder \\
+NFR4 & Partially validated & Memory evaluation (Table~\ref{tab:memory-utilisation}); T16 placeholder \\
 NFR5 & Partially validated & T17 proxy; 100 ms polling interval \\
 NFR6 & Validated & T10; logging support (T18 requires infrastructure) \\
 NFR7 & Validated & T19; E3 \\
@@ -279,7 +279,7 @@ Gap (2) is addressed by the dependency graph and root-cause analysis. The E2 sce
 
 Gap (3) is addressed by the resolved-episodes set. Unit tests T15 and T34 verify that resolution executes at most once per episode and that new episodes permit re-execution. The E1 alert count (1) confirms that the at-most-once guarantee holds under sustained fault conditions.
 
-Gap (4) is addressed by the rule-based, deterministic processing model. The CPU utilisation data (Table~7.2) shows that prism-police consumes 77.49\% of a single core at 1000 samples per second, compared to 313.83\% (Prometheus) and 1,035.97\% (Nagios). The framework uses no \gls{ml}-based inference, no statistical models, and no adaptive algorithms. All processing is deterministic and reproducible (T14). The determinism claim applies to decision logic and processing order: identical inputs produce identical fault detection, root-cause identification, and resolution outcomes. The evaluation measures average CPU utilisation but does not measure worst-case execution time (\gls{wcet}) or latency jitter. Execution time analysis on the target embedded platform remains future work (Section8.4).
+Gap (4) is addressed by the rule-based, deterministic processing model. The CPU utilisation data (Table~\ref{tab:cpu-utilisation}) shows that prism-police consumes 77.49\% of a single core at 1000 samples per second, compared to 313.83\% (Prometheus) and 1,035.97\% (Nagios). The framework uses no \gls{ml}-based inference, no statistical models, and no adaptive algorithms. All processing is deterministic and reproducible (T14). The determinism claim applies to decision logic and processing order: identical inputs produce identical fault detection, root-cause identification, and resolution outcomes. The evaluation measures average CPU utilisation but does not measure worst-case execution time (\gls{wcet}) or latency jitter. Execution time analysis on the target embedded platform remains future work (Section8.4).
 
 \subsection{Alert Reduction as a Structural Property}
 
