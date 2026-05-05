@@ -1,14 +1,14 @@
-The previous chapter presented the conceptual design of a stateful \gls{fdir} framework for \gls{soa}-based industrial routers. This chapter describes the prototype that realises that design on a concrete industrial router platform. The purpose of the prototype is twofold: first, to demonstrate that the conceptual architecture can be implemented within the resource and integration constraints of an actual embedded router; and second, to provide a concrete artefact against which the functional and non-functional requirements defined in Section 5.2 can be evaluated (Chapter 7).
+The previous chapter presented the conceptual design of a stateful \gls{fdir} framework for \gls{soa}-based industrial routers. This chapter describes the prototype that realises that design on a concrete industrial router platform. The purpose of the prototype is twofold: first, to demonstrate that the conceptual architecture can be implemented within the resource and integration constraints of an actual embedded router; and second, to provide a concrete artefact against which the functional and non-functional requirements defined in Section~\ref{sec:requirements-principles} can be evaluated (Chapter~\ref{chap:evaluation}).
 
-The chapter describes only what was implemented and how. Design rationale and literature justification are not repeated from Chapter 5 unless necessary to explain an implementation deviation. Where the prototype deviates from the conceptual design, the deviation is stated explicitly and justified. Where features defined in the conception are not implemented, this is documented in the limitations section.
+The chapter describes only what was implemented and how. Design rationale and literature justification are not repeated from Chapter~\ref{chap:conception} unless necessary to explain an implementation deviation. Where the prototype deviates from the conceptual design, the deviation is stated explicitly and justified. Where features defined in the conception are not implemented, this is documented in the limitations section.
 
-\subsection{System Overview: What Is Implemented}
+\subsection{System Overview: What Is Implemented}\label{sec:impl-overview}
 
 The prototype is a C++20 application named \texttt{prism-police} that runs as a long-lived daemon process on a Belden/Hirschmann industrial router platform. The application subscribes to the platform's message bus, receives telemetry definitions, monitoring rules, and telemetry samples at runtime, evaluates samples against threshold-based rules, performs root-cause analysis through declared dependency chains, executes external resolution scripts, and tracks fault episodes as stateful runtime entities.
 
-The prototype implements the complete \gls{fdir} processing pipeline defined in Section 5.8.2: event ingestion, validation, configuration processing, dependency-ordered sample evaluation, rule-based fault detection, episode lifecycle management, root cause analysis, resolution execution, transitive impact suppression, and persistent fault detection. Configuration is delivered through the platform's \gls{yang}/\gls{netconf} infrastructure, and telemetry samples are received through the ZeroMQ-based message bus.
+The prototype implements the complete \gls{fdir} processing pipeline defined in Section~\ref{sec:processing-pipeline}: event ingestion, validation, configuration processing, dependency-ordered sample evaluation, rule-based fault detection, episode lifecycle management, root cause analysis, resolution execution, transitive impact suppression, and persistent fault detection. Configuration is delivered through the platform's \gls{yang}/\gls{netconf} infrastructure, and telemetry samples are received through the ZeroMQ-based message bus.
 
-\subsubsection{Target Platform}
+\subsubsection{Target Platform}\label{sec:target-platform}
 
 The prototype is deployed on the Belden/Hirschmann PRISM platform, an \gls{soa}-based industrial router environment (the platform architecture is illustrated in Figure~\ref{fig:fdir-placement-within-soa}). The platform provides:
 
@@ -19,9 +19,9 @@ The prototype is deployed on the Belden/Hirschmann PRISM platform, an \gls{soa}-
 \item A structured logging infrastructure (\texttt{bil\_log}) for component-tagged diagnostic output.
 \end{itemize}
 
-The prototype integrates with these platform services as a regular SOA participant, consistent with the internal-service placement decision described in Section 5.1.2.
+The prototype integrates with these platform services as a regular \gls{soa} participant, consistent with the internal-service placement decision described in Section~\ref{sec:chosen-approach}.
 
-\subsection{Architecture Realisation}
+\subsection{Architecture Realisation}\label{sec:architecture-realisation}
 
 This section maps the seven conceptual components defined in Section 5.8.1 to their implementation in the prototype. Table~\ref{tab:component-mapping} provides the mapping.
 
@@ -31,7 +31,7 @@ This section maps the seven conceptual components defined in Section 5.8.1 to th
 \label{tab:component-mapping}
 \begin{tabular}{p{4cm} p{4cm} p{6cm}}
 \toprule
-Conceptual Component (Section 5.8.1) & Implementation Artefact & Primary Files \\
+Conceptual Component (Section~\ref{sec:architectural-components}) & Implementation Artefact & Primary Files \\
 \midrule
 InputBlock & InputBlock class & input\_block.hpp, input\_block.cpp \\
 FormatterBlock (coordinator) & FormatterBlock class & formatterBlock.hpp, formatterBlock.cpp \\
@@ -53,14 +53,14 @@ In addition to the seven core components, the prototype includes two platform in
 
 These integration layers bridge the gap between the platform's specific communication mechanisms and the framework's internal data model. They are not part of the conceptual \gls{fdir} architecture but are necessary implementation artefacts for platform deployment.
 
-The root-cause traversal algorithm described in Section 5.5.3 is implemented within FormatterBlock::processSampleEvent() as the method \texttt{computeDeepRootForRule()}, rather than delegated to the \texttt{DependencyAnalyzer} class. The algorithm is functionally identical to the conceptual specification: it follows upstream \texttt{DependsOn} dependencies, checks for active fault episodes via \texttt{EpisodeManager::isActive()}, uses a visited set for cycle termination, and returns the deepest faulted upstream telemetry. The implementation is placed in \texttt{FormatterBlock} because the traversal requires direct access to \texttt{EpisodeManager} state that is co-located within the same coordinator component.
+The root-cause traversal algorithm described in Section~\ref{sec:root-cause-analysis} is implemented within FormatterBlock::processSampleEvent() as the method \texttt{computeDeepRootForRule()}, rather than delegated to the \texttt{DependencyAnalyzer} class. The algorithm is functionally identical to the conceptual specification: it follows upstream \texttt{DependsOn} dependencies, checks for active fault episodes via \texttt{EpisodeManager::isActive()}, uses a visited set for cycle termination, and returns the deepest faulted upstream telemetry. The implementation is placed in \texttt{FormatterBlock} because the traversal requires direct access to \texttt{EpisodeManager} state that is co-located within the same coordinator component.
 
 The \texttt{DependencyAnalyzer} class provides an equivalent \texttt{findRootCause()} method and is available for use in configurations where the traversal logic is invoked from outside the main processing pipeline.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\textwidth]{plantuml-architecture-1.pdf}
-  \caption{Class diagram of the FDIR framework components and their relationships}
+  \caption{Class diagram of the \gls{fdir} framework components and their relationships}
   \label{fig:plantuml1}
 \end{figure}
 
@@ -72,13 +72,13 @@ The \texttt{DependencyAnalyzer} class provides an equivalent \texttt{findRootCau
 \end{figure}
 
 
-\subsection{Component Description}
+\subsection{Component Description}\label{sec:component-description}
 
 This section describes each implemented component, its responsibilities, and its interactions with other components.
 
 \subsubsection{InputBlock}
 
-\texttt{InputBlock} serves as the ingestion and validation gate. It receives telemetry definitions, rule definitions, and telemetry samples from external sources and enforces the validation constraints defined in Section 5.3.2:
+\texttt{InputBlock} serves as the ingestion and validation gate. It receives telemetry definitions, rule definitions, and telemetry samples from external sources and enforces the validation constraints defined in Section~\ref{sec:ingestion-validation}:
 
 \begin{itemize}
 \item Rejects telemetry definitions and rule definitions with empty source or metric name fields.
@@ -96,7 +96,7 @@ Validated, non-duplicate inputs are forwarded to \texttt{FormatterBlock} for enq
 
 First, it implements the \texttt{IDataRepository} interface, serving as the authoritative data store for all telemetry definitions, rule definitions, samples, fault records, dependency graphs, suppression counters, resolved episode records, persistent fault entries, and disabled rule sets. All other components access shared state exclusively through this interface.
 
-Second, it owns and orchestrates all other \gls{fdir} components (\texttt{EventQueue}, \texttt{EpisodeManager}, \texttt{RuleStateTracker}, \texttt{FaultDetector}, \texttt{ResolutionEngine}) via composition. It implements the seven-phase processing pipeline described in Section 5.8.2, invoked through the \texttt{processAllEvents()} method.
+Second, it owns and orchestrates all other \gls{fdir} components (\texttt{EventQueue}, \texttt{EpisodeManager}, \texttt{RuleStateTracker}, \texttt{FaultDetector}, \texttt{ResolutionEngine}) via composition. It implements the seven-phase processing pipeline described in Section~\ref{sec:processing-pipeline}, invoked through the \texttt{processAllEvents()} method.
 
 State management within \texttt{FormatterBlock} includes:
 
@@ -106,7 +106,7 @@ State management within \texttt{FormatterBlock} includes:
 \item \texttt{dependencies}: Map from telemetry ID to list of upstream telemetry IDs.
 \item \texttt{reverseDependencies}: Map from telemetry ID to list of downstream telemetry IDs.
 \item \texttt{suppressionCounters}: Map from telemetry ID to remaining suppression sample count.
-\item \texttt{resolvedEpisodes}: Set of \texttt{(telemetryId, episodeId)} pairs for which resolution has been executed. The conceptual design supports pruning entries upon episode end (Section 5.6.3); the prototype does not implement this pruning, and the set grows monotonically during operation.
+\item \texttt{resolvedEpisodes}: Set of \texttt{(telemetryId, episodeId)} pairs for which resolution has been executed. The conceptual design supports pruning entries upon episode end (Section~\ref{sec:at-most-once}); the prototype does not implement this pruning, and the set grows monotonically during operation.
 \item \texttt{persistentFaults}: Vector of \texttt{PersistentFaultData} entries.
 \item \texttt{disabledRules}: Set of rule IDs disabled due to unresolvable dependency references.
 \end{itemize}
@@ -117,7 +117,7 @@ When rule definitions change, \texttt{FormatterBlock} invokes \texttt{rebuildAll
 
 \texttt{FaultDetector} evaluates telemetry samples against registered rules. For each rule matching the incoming sample's source and metric, it compares the sample value against the rule's threshold using the declared operator (GT, LT, EQ, NE, GTE, LTE). If the comparison evaluates to true, a \texttt{FaultStatus} entry is created and stored in the repository. Disabled rules are skipped. If the telemetry ID is currently suppressed, the fault is created with the \texttt{IsSuppressed} flag set to true.
 
-Scope reduction from conception: The conceptual design specifies that rule evaluation supports integer, float, boolean, and string data types (Section 5.3.1). The prototype implements threshold comparison only for \texttt{float} values. The \texttt{TelemetryValue} type is defined as \texttt{std::variant<int, float, bool, std::string>}, but \texttt{FaultDetector::checkRule()} extracts only the \texttt{float} alternative via \texttt{std::get\_if<float>}. For non-float values, the method returns false (no violation). This restricts the prototype to numeric threshold comparisons on floating-point telemetry.
+Scope reduction from conception: The conceptual design specifies that rule evaluation supports integer, float, boolean, and string data types (Section~\ref{sec:telemetry-data-model}). The prototype implements threshold comparison only for \texttt{float} values. The \texttt{TelemetryValue} type is defined as \texttt{std::variant<int, float, bool, std::string>}, but \texttt{FaultDetector::checkRule()} extracts only the \texttt{float} alternative via \texttt{std::get\_if<float>}. For non-float values, the method returns false (no violation). This restricts the prototype to numeric threshold comparisons on floating-point telemetry.
 
 Scope reduction from conception: All faults are assigned \texttt{Severity::Critical}. The \texttt{Severity} enum defines multiple levels, but only Critical is used.
 
@@ -132,7 +132,7 @@ Scope reduction from conception: All faults are assigned \texttt{Severity::Criti
 \item \texttt{totalEpisodesStarted}
 \end{itemize}
 
-State transitions follow Section 5.6.2. The \texttt{checkAndUpdateEpisode()} method returns true only on episode start.
+State transitions follow Section~\ref{sec:episode-lifecycle}. The \texttt{checkAndUpdateEpisode()} method returns true only on episode start.
 
 \subsubsection{RuleStateTracker}
 
@@ -150,7 +150,7 @@ State transitions follow Section 5.6.2. The \texttt{checkAndUpdateEpisode()} met
 
 \texttt{IDataRepository} is an abstract interface decoupling components from \texttt{FormatterBlock}. It enables unit testing via mock implementations.
 
-\subsection{Data Model Implementation}
+\subsection{Data Model Implementation}\label{sec:data-model-impl}
 
 The prototype defines its core data structures in \texttt{telemetry\_types.hpp}.
 
@@ -201,11 +201,11 @@ PersistentFaultData contains:
 \item \texttt{rootCauseMetric}
 \end{itemize}
 
-The data structures listed above are mapped to a YANG data model that defines both the configuration interface (telemetry definitions, rule definitions) and the read-only operational state (persistent fault entries). The YANG model serves as the contract between the framework and external management systems accessing the router via NETCONF (Section~5.8.4).
+The data structures listed above are mapped to a \gls{yang} data model that defines both the configuration interface (telemetry definitions, rule definitions) and the read-only operational state (persistent fault entries). The \gls{yang} model serves as the contract between the framework and external management systems accessing the router via \gls{netconf} (Section~\ref{sec:configuration-model}).
 
-\subsection{Data Flow and Control Flow}
+\subsection{Data Flow and Control Flow}\label{sec:impl-data-flow}
 
-\subsubsection{Ingestion Paths}
+\subsubsection{Ingestion Paths}\label{sec:ingestion-paths}
 
 The prototype receives data through two paths:
 
@@ -268,7 +268,7 @@ Traversal uses \gls{dfs} with visited set and follows \texttt{DependsOn} chains.
 \subsubsection{Transitive Impact Computation and Suppression}
 
 Impacts are computed via \gls{bfs} over \texttt{reverseDependencies}. Suppression window is 60 samples.
-\subsection{Implementation Details}
+\subsection{Implementation Details}\label{sec:impl-details}
 
 \subsubsection{Technology Stack}
 
@@ -308,13 +308,13 @@ This model ensures that the framework's behaviour is determined by the order of 
 
 Centralised state in FormatterBlock. All authoritative mutable state resides in \texttt{FormatterBlock}, which implements the \texttt{IDataRepository} interface. This creates a monolithic coordinator where all components depend on a single class. The trade-off is consistency over modularity: a distributed state model would require synchronisation mechanisms that add overhead and non-deterministic timing behaviour. For the prototype, the centralised model ensures that all state transitions are serialised and observable.
 
-Inline root-cause traversal. As noted in Section 6.2, root-cause analysis is implemented inline in \texttt{FormatterBlock} rather than delegated to the \texttt{DependencyAnalyzer} class. This reduces interface indirection but increases the coupling between \texttt{FormatterBlock} and the root-cause algorithm. The trade-off was made because the inline implementation requires direct access to \texttt{EpisodeManager} state that was not exposed through \texttt{IDataRepository}.
+Inline root-cause traversal. As noted in Section~\ref{sec:architecture-realisation}, root-cause analysis is implemented inline in \texttt{FormatterBlock} rather than delegated to the \texttt{DependencyAnalyzer} class. This reduces interface indirection but increases the coupling between \texttt{FormatterBlock} and the root-cause algorithm. The trade-off was made because the inline implementation requires direct access to \texttt{EpisodeManager} state that was not exposed through \texttt{IDataRepository}.
 
-Resolution via \texttt{std::system()}. Resolution scripts are executed through \texttt{std::system()}, which invokes \texttt{fork()} and \texttt{exec()} on the underlying platform. This is resource-intensive on embedded systems. No resource limits, timeouts, or sandboxing are applied to resolution scripts. A misbehaving script (infinite loop, excessive memory consumption) could affect router operation. This is an accepted implementation constraint; the conceptual design acknowledges this limitation in Section 5.7.1.
+Resolution via \texttt{std::system()}. Resolution scripts are executed through \texttt{std::system()}, which invokes \texttt{fork()} and \texttt{exec()} on the underlying platform. This is resource-intensive on embedded systems. No resource limits, timeouts, or sandboxing are applied to resolution scripts. A misbehaving script (infinite loop, excessive memory consumption) could affect router operation. This is an accepted implementation constraint; the conceptual design acknowledges this limitation in Section~\ref{sec:resolution-execution}.
 
-\subsection{Testing Strategy}
+\subsection{Testing Strategy}\label{sec:testing-strategy}
 
-The prototype is validated through a structured unit test suite implemented using the Boost.Test framework. The test suite serves two purposes: verifying the correctness of individual components and establishing traceability between implemented behaviour and the functional and non-functional requirements defined in Section 5.2.
+The prototype is validated through a structured unit test suite implemented using the Boost.Test framework. The test suite serves two purposes: verifying the correctness of individual components and establishing traceability between implemented behaviour and the functional and non-functional requirements defined in Section~\ref{sec:requirements-principles}.
 
 \subsubsection{Test-Based Validation Approach}
 
@@ -362,7 +362,7 @@ Third, tests verify observable state changes (episode IDs, active/inactive statu
 
 The test scenarios cover fault detection, episode lifecycle transitions, dependency chain traversal, resolution execution, suppression mechanics, and persistent fault detection. These scenarios are documented in the test specification (Table~\ref{tab:test-specification}).
 \FloatBarrier
-\subsection{Test Traceability Matrix}
+\subsection{Test Traceability Matrix}\label{sec:test-traceability}
 
 Table~\ref{tab:test-traceability-matrix} maps each requirement to the test cases that validate it. This matrix ensures that every functional and non-functional requirement defined in Section 5.2 is covered by at least one test case, and that the coverage relationship is explicit and auditable.
 
@@ -397,7 +397,7 @@ NFR11 & Thread-safe concurrent operation & T22, T30 \\
 \label{tab:test-traceability-matrix}
 \end{table}
 \FloatBarrier
-\subsection{Test Specification}
+\subsection{Test Specification}\label{sec:test-specification}
 
 Table~\ref{tab:test-specification} provides the detailed test specification. For each test, the table lists the Boost.Test case name, the requirements verified, and the expected result that constitutes a pass.
 
@@ -461,26 +461,26 @@ T47 & Callback\_Rule\_Violation\_Via\_Input & Integration & Callback rule violat
 \end{tabular}
 \end{table}
 
-\subsection{Limitations of the Prototype}
+\subsection{Limitations of the Prototype}\label{sec:impl-limitations}
 
-This section documents the features defined in the conceptual design (Chapter 5) that are not implemented in the prototype, as well as implementation constraints that affect the prototype's applicability.
+This section documents the features defined in the conceptual design (Chapter~\ref{chap:conception}) that are not implemented in the prototype, as well as implementation constraints that affect the prototype's applicability.
 
 \subsubsection{Features Not Implemented}
 
-Graduated severity assignment. All detected faults are assigned \texttt{Severity::Critical}. The six-level severity enum is defined but not used for differentiated fault classification or recovery selection (Section 5.4.3).
+Graduated severity assignment. All detected faults are assigned \texttt{Severity::Critical}. The six-level severity enum is defined but not used for differentiated fault classification or recovery selection (Section~\ref{sec:fault-record-creation}).
 
-Resolution script resource limits. No timeouts, memory limits, or sandboxing are applied to resolution script execution (Section 5.7.1).
+Resolution script resource limits. No timeouts, memory limits, or sandboxing are applied to resolution script execution (Section~\ref{sec:resolution-execution}).
 
-Recovery retry or alternative strategies. Resolution executes at most once per episode. If the script fails, no retry or alternative recovery is attempted instead reported as persistent fault (Section 5.6.4).
+Recovery retry or alternative strategies. Resolution executes at most once per episode. If the script fails, no retry or alternative recovery is attempted instead reported as persistent fault (Section~\ref{sec:persistent-fault-detection}).
 
-Configuration rollback. If a YANG/NETCONF configuration commit introduces invalid or undesirable rule definitions (e.g., rules that create dependency cycles or reference non-existent telemetry sources), the framework applies the new configuration but provides no mechanism to revert to the previous set of telemetry definitions and rule definitions. Rollback must be performed externally through the NETCONF server by re-committing the prior configuration.
+Configuration rollback. If a \gls{yang}/\gls{netconf} configuration commit introduces invalid or undesirable rule definitions (e.g., rules that create dependency cycles or reference non-existent telemetry sources), the framework applies the new configuration but provides no mechanism to revert to the previous set of telemetry definitions and rule definitions. Rollback must be performed externally through the \gls{netconf} server by re-committing the prior configuration.
 
-\subsection{Summary}
+\subsection{Summary}\label{sec:impl-summary}
 
-This chapter described the prototype implementation of the stateful \gls{fdir} framework on the Belden/Hirschmann PRISM industrial router platform. The unit test suite executes in a host-compiled environment using mock message bus interfaces. Integration tests T46 and T47 verify the callback interface against the platform's ZeroMQ message bus abstraction layer; full end-to-end validation on the physical router hardware is performed as part of the platform's module test infrastructure (Section~6.5.1) but is not included in the automated unit test suite. The prototype realises the seven conceptual components defined in Section 5.8.1 as C++20 classes, integrated through the \texttt{IDataRepository} interface and coordinated by \texttt{FormatterBlock} as the central facade. Two platform integration layers (\texttt{PrismPoliceCallbacks}, \texttt{PrismPoliceConfigCache}) bridge the PRISM platform's ZeroMQ message bus and \gls{yang}/\gls{netconf} configuration engine to the framework's internal data model.
+This chapter described the prototype implementation of the stateful \gls{fdir} framework on the Belden/Hirschmann PRISM industrial router platform. The unit test suite executes in a host-compiled environment using mock message bus interfaces. Integration tests T46 and T47 verify the callback interface against the platform's ZeroMQ message bus abstraction layer; full end-to-end validation on the physical router hardware is performed as part of the platform's module test infrastructure (Section~6.5.1) but is not included in the automated unit test suite. The prototype realises the seven conceptual components defined in Section~\ref{sec:architectural-components} as C++20 classes, integrated through the \texttt{IDataRepository} interface and coordinated by \texttt{FormatterBlock} as the central facade. Two platform integration layers (\texttt{PrismPoliceCallbacks}, \texttt{PrismPoliceConfigCache}) bridge the PRISM platform's ZeroMQ message bus and \gls{yang}/\gls{netconf} configuration engine to the framework's internal data model.
 
-The seven-phase processing pipeline defined in Section 5.8.2 is implemented in FormatterBlock::processAllEvents(), invoked at from the main loop. The pipeline processes configuration events before sample events, sorts samples in dependency-topological then timestamp order, evaluates rules, tracks episode lifecycles, performs root-cause analysis, executes resolution scripts, and applies transitive suppression to downstream impacts.
+The seven-phase processing pipeline defined in Section~\ref{sec:processing-pipeline} is implemented in FormatterBlock::processAllEvents(), invoked at from the main loop. The pipeline processes configuration events before sample events, sorts samples in dependency-topological then timestamp order, evaluates rules, tracks episode lifecycles, performs root-cause analysis, executes resolution scripts, and applies transitive suppression to downstream impacts.
 
-A structured test suite of 47 test cases validates the prototype against all eight functional requirements (FR1--FR8) and ten of eleven non-functional requirements (NFR1--NFR3, NFR5--NFR11). NFR4 (bounded resource usage) is partially addressed through a placeholder test that requires memory profiling for complete validation. Two integration tests (T46, T47) additionally verify the platform callback interface, covering the north-south configuration path (management system pushes configuration to the framework) and the east-west message bus communication path (telemetry samples delivered between services). The south-north path (framework exposes operational state to management systems) is validated by T10, which verifies that persistent fault entries are retrievable through the NETCONF operational state interface. The test traceability matrix (Table~\ref{tab:test-traceability-matrix}) and test specification (Table~\ref{tab:test-specification}) establish a traceable link between implemented tests and requirements, supporting the evaluation in Chapter 7.
+A structured test suite of 47 test cases validates the prototype against all eight functional requirements (FR1--FR8) and ten of eleven non-functional requirements (NFR1--NFR3, NFR5--NFR11). NFR4 (bounded resource usage) is partially addressed through a placeholder test that requires memory profiling for complete validation. Two integration tests (T46, T47) additionally verify the platform callback interface, covering the north-south configuration path (management system pushes configuration to the framework) and the east-west message bus communication path (telemetry samples delivered between services). The south-north path (framework exposes operational state to management systems) is validated by T10, which verifies that persistent fault entries are retrievable through the \gls{netconf} operational state interface. The test traceability matrix (Table~\ref{tab:test-traceability-matrix}) and test specification (Table~\ref{tab:test-specification}) establish a traceable link between implemented tests and requirements, supporting the evaluation in Chapter~\ref{chap:evaluation}.
 
 The following chapter evaluates the prototype against the requirements and research questions, using the test results and scenario-based analysis to assess the framework's correctness, determinism, and suitability for industrial router deployment.

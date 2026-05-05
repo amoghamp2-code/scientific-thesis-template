@@ -1,12 +1,12 @@
 This chapter introduces the fundamental concepts required to understand stateful failure tracking and resolution in modular, \gls{soa} based industrial routers. It outlines the technological background of industrial communication networks and routers, explains Service-Oriented Architecture in this context, defines faults and failures in service-based systems, describes telemetry and observability, discusses service dependencies and failure propagation, and summarises core principles of Fault Detection, Isolation and Recovery (\gls{fdir}). The chapter concludes with router specific constraints that influence the design of any fault management framework. Together, these foundations provide the conceptual basis for the research questions and approach developed in subsequent chapters.
 
-\section{Industrial Communication Networks and Routers}
+\section{Industrial Communication Networks and Routers}\label{sec:industrial-networks}
 
 Industrial communication networks support data exchange among field devices, controllers, supervisory systems, and higher-level \gls{it} infrastructures. Typical examples include production lines, process plants, energy distribution networks, and transportation systems including rail and road vehicles that rely on cellular connectivity for remote management. In these environments, communication infrastructures operate under strict requirements regarding availability, timing behaviour, determinism, and safety. Interruptions can affect any network component cables, power supplies, wireless links subject to interference, or the routers themselves and propagate to dependent applications.
 
 Industrial routers occupy a central position in these networks. They interconnect different subnetworks, bridge between operational technology (\gls{ot}) and information technology (\gls{it}), and provide security, remote access, and device management functions. In contrast to purely \gls{it}-focused routers, industrial routers integrate hardware and software designed for long-term deployment, extended temperature ranges, and operation in electromagnetically noisy or physically exposed environments. Configuration interfaces, device management functions, and monitoring capabilities are typically tailored to industrial use cases and to integration with \gls{scada} systems or similar platforms.
 
-While industrial routers share core networking functions with \gls{it} routers (routing, firewalling, \gls{vpn}), the distinguishing characteristic is the operational context: industrial routers must maintain these functions under the constraints described in Section 2.7 (resource bounds, determinism requirements, long deployment lifecycles, harsh environments, safety relevance). From a functional perspective, industrial routers typically provide:
+While industrial routers share core networking functions with \gls{it} routers (routing, firewalling, \gls{vpn}), the distinguishing characteristic is the operational context: industrial routers must maintain these functions under the constraints described in Section~\ref{sec:router-constraints} (resource bounds, determinism requirements, long deployment lifecycles, harsh environments, safety relevance). From a functional perspective, industrial routers typically provide:
 
 \begin{itemize}
 \item L3 routing and network address translation,
@@ -16,7 +16,7 @@ While industrial routers share core networking functions with \gls{it} routers (
 \item diagnostics and telemetry export.
 \end{itemize}
 
-Industrial automation applications depend on these functions primarily at the Ethernet level (OSI Layer 2) and the \gls{ip} level (OSI Layer 3). Faults affecting router functions therefore propagate beyond the network layer and directly influence application-level behaviour, production continuity, safety, and regulatory compliance. As a result, failures in industrial routers cannot be treated as isolated component faults but must be detected, analysed, and resolved with awareness of their systemic impact.
+Industrial automation applications depend on these functions primarily at the Ethernet level (OSI Layer 2) and the \gls{ip} level (OSI Layer 3). Faults affecting router functions therefore propagate beyond the network layer and directly influence application-level behaviour, production continuity, safety, and regulatory compliance. As a result, failures in industrial routers cannot be treated as isolated component faults but must be detected, analysed, and resolved with awareness of their systemic impact. Figure~\ref{fig:typical-industrial-deployment} illustrates a typical industrial deployment in which routers interconnect field-level devices with supervisory and enterprise networks.
 
 \begin{figure}[htbp]
   \centering
@@ -25,7 +25,7 @@ Industrial automation applications depend on these functions primarily at the Et
   \label{fig:typical-industrial-deployment}
 \end{figure}
 
-\section{Service-Oriented Architecture in Industrial Routers}
+\section{Service-Oriented Architecture in Industrial Routers}\label{sec:soa-in-routers}
 
 Service-Oriented Architecture (\gls{soa}) is an architectural paradigm in which system functionality is decomposed into discrete services that interact through well-defined interfaces and protocols. A service encapsulates a coherent set of responsibilities, maintains its own internal state, and exposes operations to other services or clients. Service interactions rely on explicit contracts regarding inputs, outputs, and quality attributes.
 
@@ -33,7 +33,7 @@ In the context of industrial routers, \gls{soa} principles appear in the modular
 
 The adoption of \gls{soa} in embedded router platforms introduces service-based failure modes that do not exist in monolithic architectures. In a monolithic system, faults are confined within a single process boundary. In an \gls{soa} system, interface mismatches, inconsistent state between services, failures in service discovery, or timeouts in inter-service communication influence router behaviour even when individual software modules operate within their local design assumptions. A service does not need to know the internal state of another service, but it depends on the correctness of the other service's externally observable behaviour. A structured view of services, their contracts, and dependencies is therefore a prerequisite for systematic fault management in \gls{soa}-based routers.
 
-\section{Faults, Errors, and Failures in Service-based Systems}
+\section{Faults, Errors, and Failures in Service-based Systems}\label{sec:faults-errors-failures}
 
 Fault management research distinguishes between faults, errors, and failures. A fault denotes an underlying defect or abnormal condition in a system component, such as a software bug, misconfiguration, or hardware malfunction. An error represents a system state in which some internal data or control flow deviates from the specified behaviour. A failure occurs when the delivered service deviates from its specification as perceived by an external observer.
 
@@ -51,7 +51,7 @@ A fault in one service produces errors in its internal state or outputs, and the
 
 For industrial routers, misconfigurations, software defects, and resource exhaustion in core services directly influence connectivity, security enforcement, and monitoring. A router specific view on fault types, including networking and industrial protocol aspects, is essential for precise fault tracking and meaningful recovery strategies.
 
-\section{Telemetry and Observability}
+\section{Telemetry and Observability}\label{sec:telemetry-observability}
 
 Telemetry in distributed systems comprises all data that describes system behaviour and state over time. Modern observability practice often groups telemetry into three categories: metrics, logs, and traces.
 
@@ -63,7 +63,7 @@ Traces capture end to end execution paths of individual requests or workflows ac
 
 Observability emerges when telemetry provides sufficient insight to explain why the system behaves in a certain way, to localise root causes of failures, and to validate recovery actions. For industrial routers, telemetry generation and processing must respect resource limitations and real time constraints. Any \gls{fdir} framework for industrial routers requires a structured telemetry model that maps relevant metrics, logs, and traces to fault types and to the internal states of router services.
 
-\section{Service Dependencies and Failure Propagation}
+\section{Service Dependencies and Failure Propagation}\label{sec:dependencies-propagation}
 
 Service based systems exhibit complex dependency structures. A service depends on other services for data, configuration, authentication, or infrastructure access. These dependencies form directed graphs in which nodes represent services and edges represent dependency relations. Dependencies may be static, defined by configuration or design time bindings, or dynamic, created at runtime based on discovery, load balancing, or failover mechanisms.
 
@@ -77,7 +77,7 @@ Failure propagation in such graphs occurs when an error in one service influence
 
 In industrial routers, dependency structures often involve core services such as routing, \gls{vpn}, firewalling, and device management, as well as auxiliary services such as logging, certificate management. Explicit modelling of these dependencies enables reasoning about which services are potentially affected by a given fault and where to localise the root cause of an observed failure. A stateful \gls{fdir} framework therefore requires both a representation of dependency graphs and mechanisms to update these graphs when services are added, removed, or reconfigured.
 
-\section{Fault Detection, Isolation, and Recovery (FDIR)}
+\section{Fault Detection, Isolation, and Recovery (\gls{fdir})}\label{sec:fdir-background}
 
 Fault Detection, Isolation, and Recovery (\gls{fdir}) denote an integrated process widely used in safety-critical and mission-critical systems.
 
@@ -87,7 +87,7 @@ Stateful \gls{fdir} extends this process by maintaining explicit runtime informa
 
 In \gls{soa}-based industrial routers, stateful \gls{fdir} must integrate fault classification, telemetry interpretation, and dependency reasoning while ensuring deterministic execution, bounded resource usage, and transparent decision-making. Recovery actions must be coordinated with identified root causes and executed at most once per fault episode, while dependent symptom faults are managed in a controlled manner. These requirements go beyond stateless alerting and form the foundation for predictable and analysable fault management in embedded router platforms.
 
-\section{Constraints and Characteristics of Industrial Routers}
+\section{Constraints and Characteristics of Industrial Routers}\label{sec:router-constraints}
 
 Industrial routers differ from general purpose cloud or datacentre systems along several dimensions that strongly influence fault management strategies:
 
@@ -100,4 +100,4 @@ Industrial routers differ from general purpose cloud or datacentre systems along
 \item Operational predictability and certification requirements: Fault management behaviour must be analysable, explainable, and reproducible across deployments. Recovery logic must avoid nondeterministic decision-making and uncontrolled repetition, supporting certification and long-term maintenance.
 \end{itemize}
 
-These characteristics require fault management approaches that favour deterministic logic, explicit state tracking, transparent decision-making, and bounded use of telemetry over heavyweight, data-driven methods. An \gls{fdir} framework for industrial routers must therefore incorporate stateful fault episode management, dependency-aware recovery coordination, and bounded execution semantics, while remaining adaptable to evolving service architectures and operational requirements. The framework presented in Chapter 5 addresses these constraints as follows: resource constraints are addressed through a bounded event queue and sample-driven processing (Principles 1 and 5); determinism is addressed through single-threaded, deterministic rule evaluation with no \gls{ml}-based inference (Principle 2); long deployment lifecycles are addressed through declarative \gls{yang}/\gls{netconf} configuration that supports runtime reconfiguration without code changes (Principle 3); harsh environmental conditions are addressed indirectly the framework detects their effects through telemetry symptoms but does not manage hardware faults directly (Section 5.1.3); and safety/security relevance is addressed through root-cause-only resolution that prevents cascading recovery actions from disrupting the forwarding plane (Principle 4). The next chapter formulates the research questions and outlines the methodology used to investigate stateful failure tracking and recovery in industrial routers.
+These characteristics require fault management approaches that favour deterministic logic, explicit state tracking, transparent decision-making, and bounded use of telemetry over heavyweight, data-driven methods. An \gls{fdir} framework for industrial routers must therefore incorporate stateful fault episode management, dependency-aware recovery coordination, and bounded execution semantics, while remaining adaptable to evolving service architectures and operational requirements. The framework presented in Chapter~\ref{chap:conception} addresses these constraints as follows: resource constraints are addressed through a bounded event queue and sample-driven processing (Principles 1 and 5); determinism is addressed through single-threaded, deterministic rule evaluation with no \gls{ml}-based inference (Principle 2); long deployment lifecycles are addressed through declarative \gls{yang}/\gls{netconf} configuration that supports runtime reconfiguration without code changes (Principle 3); harsh environmental conditions are addressed indirectly the framework detects their effects through telemetry symptoms but does not manage hardware faults directly (Section 5.1.3); and safety/security relevance is addressed through root-cause-only resolution that prevents cascading recovery actions from disrupting the forwarding plane (Principle 4). The next chapter formulates the research questions and outlines the methodology used to investigate stateful failure tracking and recovery in industrial routers.

@@ -1,8 +1,8 @@
-This chapter evaluates the prototype described in Chapter 6 against the functional and non-functional requirements defined in Section 5.2 and the research questions formulated in Chapter 3. The evaluation combines three complementary methods: (1) unit test results that verify individual requirements through the test traceability matrix established in Section 6.8, (2) quantitative experiments that measure alert volume, CPU utilisation, and memory consumption under controlled fault scenarios, and (3) a qualitative comparison with two established monitoring tools Prometheus and Nagios that contextualises the framework's capabilities against existing practice.
+This chapter evaluates the prototype described in Chapter~\ref{chap:implementation} against the functional and non-functional requirements defined in Section~\ref{sec:requirements-principles} and the research questions formulated in Chapter~\ref{chap:methodology}. The evaluation combines three complementary methods: (1) unit test results that verify individual requirements through the test traceability matrix established in Section~\ref{sec:test-traceability}, (2) quantitative experiments that measure alert volume, \gls{cpu} utilisation, and memory consumption under controlled fault scenarios, and (3) a qualitative comparison with two established monitoring tools Prometheus and Nagios that contextualises the framework's capabilities against existing practice.
 
 The evaluation does not claim that the prototype is production-ready or that it supersedes general-purpose monitoring platforms. Prometheus and Nagios serve fundamentally different purposes and operate at different architectural scales. They are included as reference points to illustrate the behavioural differences that arise from the framework's episode-aware, dependency-coordinated design specifically in alert volume, resource consumption, and the presence or absence of root-cause analysis, suppression, and episode tracking. Where the data supports a conclusion, it is stated. Where it does not, the limitation is noted.
 
-\subsection{Evaluation Setup}
+\subsection{Evaluation Setup}\label{sec:eval-setup}
 
 \subsubsection{Hardware Environment}
 
@@ -27,7 +27,7 @@ Architecture & x86\_64 \\
 \end{tabular}
 \end{table}
 
-This hardware exceeds the resource profile of the target industrial router platform. Consequently, absolute CPU and memory measurements are not directly transferable to the embedded deployment target. The evaluation uses this environment to establish relative comparisons between the three systems under identical conditions and to verify functional correctness. Resource behaviour on the actual router platform remains an open validation point (Section 7.8).
+This hardware exceeds the resource profile of the target industrial router platform. Consequently, absolute CPU and memory measurements are not directly transferable to the embedded deployment target. The evaluation uses this environment to establish relative comparisons between the three systems under identical conditions and to verify functional correctness. Resource behaviour on the actual router platform remains an open validation point (Section~\ref{sec:eval-limitations}).
 
 \subsubsection{Software Environment}
 
@@ -36,7 +36,7 @@ The prototype (\texttt{prism-police}) was deployed in a Docker container that re
 \begin{itemize}
 \item The \texttt{netconfd-pro} \gls{yang}/\gls{netconf} server for north-south configuration delivery.
 \item A proxy application for east-west message bus communication via ZeroMQ.
-\item The Yuma NETCONF client for configuration injection and operational state queries.
+\item The Yuma \gls{netconf} client for configuration injection and operational state queries.
 \end{itemize}
 
 Prometheus (0.32.0) and Nagios (4.5.12) were deployed in the same Docker-based environment with equivalent monitoring configurations: the same telemetry sources, the same threshold rules, and the same fault injection sequences. All three systems received identical telemetry streams during each experiment. The specific versions of Prometheus (0.32.0) and Nagios (4.5.12) were recorded during the experiments, which gives exact reproducibility of the comparison.
@@ -76,9 +76,9 @@ Four experiment scenarios were defined, each targeting a different operational c
 \item E3 Message storm under sustained fault (180 seconds, N = 100 / 500 / 1000). A sustained fault condition is maintained while the telemetry ingestion rate is increased to N samples per second. This scenario tests the system's behaviour under high telemetry load, measuring alert volume growth, CPU utilisation scaling, and memory consumption under stress.
 \end{itemize}
 
-Each scenario was executed once per system. The measurements reported are single-run values, not averages over multiple runs. This limits the statistical confidence of the results; variability across runs is not quantified. This is acknowledged as a limitation in Section 7.8.
+Each scenario was executed once per system. The measurements reported are single-run values, not averages over multiple runs. This limits the statistical confidence of the results; variability across runs is not quantified. This is acknowledged as a limitation in Section~\ref{sec:eval-limitations}.
 
-\subsection{Quantitative Results}
+\subsection{Quantitative Results}\label{sec:quantitative-results}
 
 \subsubsection{Alert Volume}
 
@@ -103,9 +103,9 @@ E3 & 1000 & 37,220 & 179,073 & 1,000 \\
 
 \textbf{Observations:}
 
-In scenarios E1 and E2, prism-police generates exactly one alert. This is a direct consequence of the episode model (Section 5.6) and the at-most-once resolution guarantee (Section 5.6.3): the first threshold violation starts a fault episode and triggers a single detection event. Subsequent samples that continue to violate the same rule within the same episode do not generate additional alerts, because the \texttt{RuleStateTracker} reports no new rising-edge transition (Section 5.4.2).
+In scenarios E1 and E2, prism-police generates exactly one alert. This is a direct consequence of the episode model (Section~\ref{sec:episode-model}) and the at-most-once resolution guarantee (Section~\ref{sec:at-most-once}): the first threshold violation starts a fault episode and triggers a single detection event. Subsequent samples that continue to violate the same rule within the same episode do not generate additional alerts, because the \texttt{RuleStateTracker} reports no new rising-edge transition (Section~\ref{sec:rule-state-tracking}).
 
-Prometheus generates 176 alerts in E1 and 666 in E2. Nagios generates 298 and 1,201 respectively. Both systems re-evaluate and re-fire alerts on each evaluation cycle for as long as the violation persists, because neither maintains episode state that distinguishes a new fault occurrence from an ongoing violation. This behaviour is consistent with the gap identified in Section 4.1: existing monitoring tools treat each evaluation cycle independently.
+Prometheus generates 176 alerts in E1 and 666 in E2. Nagios generates 298 and 1,201 respectively. Both systems re-evaluate and re-fire alerts on each evaluation cycle for as long as the violation persists, because neither maintains episode state that distinguishes a new fault occurrence from an ongoing violation. This behaviour is consistent with the gap identified in Section~\ref{sec:lit-fault-models}: existing monitoring tools treat each evaluation cycle independently.
 
 In E2, the difference between Prometheus (666) and prism-police (1) is attributable to two factors: (i) Prometheus generates alerts for all four faulted services independently, while prism-police identifies the root cause and suppresses the three downstream symptoms; and (ii) Prometheus re-fires alerts on each evaluation cycle, while prism-police fires once per episode.
 
@@ -115,7 +115,7 @@ At N=500, Nagios (29,711) generates fewer alerts than Prometheus (37,977), while
 
 \textbf{Interpretation:}
 
-The alert volume data demonstrates that the episode model and suppression mechanism reduce the number of alerts by two to five orders of magnitude compared to stateless monitoring tools under sustained fault conditions. This reduction is a structural consequence of the design (episode gating, rising-edge detection, root-cause-only alerting) rather than a tuning artefact. The reduction directly addresses the ``redundant alerts'' and ``cascading recovery actions'' identified as gaps in Section 4.7.
+The alert volume data demonstrates that the episode model and suppression mechanism reduce the number of alerts by two to five orders of magnitude compared to stateless monitoring tools under sustained fault conditions. This reduction is a structural consequence of the design (episode gating, rising-edge detection, root-cause-only alerting) rather than a tuning artefact. The reduction directly addresses the ``redundant alerts'' and ``cascading recovery actions'' identified as gaps in Section~\ref{sec:lit-summary}.
 
 \subsubsection{CPU Utilisation}
 
@@ -183,11 +183,11 @@ Prometheus has the highest baseline memory consumption (196 MB at idle), which r
 
 Under increasing load (E3), all three systems show memory growth. Prometheus grows from 196 MB to 374 MB (1.9× increase from E0 to E3-1000). Nagios grows from 6.70 MB to 41.40 MB (6.2× increase). Prism-police grows from 13.92 MB to 29.37 MB (2.1× increase).
 
-Prism-police's memory growth from E0 to E3-1000 is 15.45 MB. The bounded event queue itself does not contribute to this growth: it has a fixed capacity of 1000 elements and operates as a drop-oldest ring buffer whose memory footprint is constant regardless of ingestion rate. The observed growth is instead attributable to data structures outside the queue that scale with the number of distinct telemetry sources: sample storage (one stored sample per telemetry ID), fault records (one per active violation), suppression counters (one per suppressed telemetry), the \texttt{resolvedEpisodes} set, and the \texttt{persistentFaults} vector. In E3-1000, 1000 distinct telemetry sources are active simultaneously, each requiring its own per-source state. The \texttt{resolvedEpisodes} set and \texttt{persistentFaults} vector grow monotonically because the pruning mechanism described in Section~5.6.3 is not implemented in the prototype. Bounding these structures to the number of concurrently active episodes (rather than the cumulative total) is an identified optimisation point for future work.
+Prism-police's memory growth from E0 to E3-1000 is 15.45 MB. The bounded event queue itself does not contribute to this growth: it has a fixed capacity of 1000 elements and operates as a drop-oldest ring buffer whose memory footprint is constant regardless of ingestion rate. The observed growth is instead attributable to data structures outside the queue that scale with the number of distinct telemetry sources: sample storage (one stored sample per telemetry ID), fault records (one per active violation), suppression counters (one per suppressed telemetry), the \texttt{resolvedEpisodes} set, and the \texttt{persistentFaults} vector. In E3-1000, 1000 distinct telemetry sources are active simultaneously, each requiring its own per-source state. The \texttt{resolvedEpisodes} set and \texttt{persistentFaults} vector grow monotonically because the pruning mechanism described in Section~\ref{sec:at-most-once} is not implemented in the prototype. Bounding these structures to the number of concurrently active episodes (rather than the cumulative total) is an identified optimisation point for future work.
 
 \textbf{Interpretation:}
 
-The memory data shows that prism-police's memory consumption ranges from 13.92~MB (E0, idle) to 29.37~MB (E3-1000, maximum tested load). For context, a representative embedded industrial router platform provides 256~MB of RAM, of which the operating system and other services consume a portion. Prism-police's peak measured consumption of 29.37~MB represents approximately 11.5\% of a 256~MB memory budget, leaving substantial headroom for other platform services. However, the test T16 (NFR4 --- bounded resource usage) is a placeholder in the current test suite and does not verify that memory consumption remains bounded over extended operational periods (days or weeks). The 2.1\texttimes{} growth factor under storm conditions indicates that memory usage is correlated with the number of concurrently active telemetry sources. Whether this growth remains bounded over time --- particularly whether the monotonically growing \texttt{resolvedEpisodes} set and \texttt{persistentFaults} vector cause unbounded accumulation during long-duration operation --- requires soak testing not performed in this evaluation. Implementing the episode-end pruning mechanism defined in Section~5.6.3 would bound these structures and is identified as a necessary optimisation for production deployment.
+The memory data shows that prism-police's memory consumption ranges from 13.92~MB (E0, idle) to 29.37~MB (E3-1000, maximum tested load). For context, a representative embedded industrial router platform provides 256~MB of RAM, of which the operating system and other services consume a portion. Prism-police's peak measured consumption of 29.37~MB represents approximately 11.5\% of a 256~MB memory budget, leaving substantial headroom for other platform services. However, the test T16 (NFR4 --- bounded resource usage) is a placeholder in the current test suite and does not verify that memory consumption remains bounded over extended operational periods (days or weeks). The 2.1\texttimes{} growth factor under storm conditions indicates that memory usage is correlated with the number of concurrently active telemetry sources. Whether this growth remains bounded over time --- particularly whether the monotonically growing \texttt{resolvedEpisodes} set and \texttt{persistentFaults} vector cause unbounded accumulation during long-duration operation --- requires soak testing not performed in this evaluation. Implementing the episode-end pruning mechanism defined in Section~\ref{sec:at-most-once} would bound these structures and is identified as a necessary optimisation for production deployment.
 
 \begin{figure}[htbp]
 \centering
@@ -196,9 +196,9 @@ The memory data shows that prism-police's memory consumption ranges from 13.92~M
 \label{fig:quantitative-comparison}
 \end{figure}
 
-\subsection{Qualitative Comparison}
+\subsection{Qualitative Comparison}\label{sec:qualitative-comparison}
 
-The quantitative results in Section~7.2 measure observable outputs (alerts, CPU, memory) but do not capture the architectural capabilities that differentiate the three systems. This section compares the systems across seven qualitative dimensions derived from the research questions and the gaps identified in the literature review.
+The quantitative results in Section~\ref{sec:quantitative-results} measure observable outputs (alerts, CPU, memory) but do not capture the architectural capabilities that differentiate the three systems. This section compares the systems across seven qualitative dimensions derived from the research questions and the gaps identified in the literature review.
 
 \begin{table}[htbp]
 \centering
@@ -226,13 +226,13 @@ Dashboard / operator interface & Supported. Native UI; integrates with Grafana. 
 \end{tabular}
 \end{table}
 
-The qualitative comparison shows that prism-police provides four capabilities absent in both Prometheus and Nagios: runtime root-cause analysis with dependency traversal, automatic transitive suppression of downstream symptoms, persistent fault tracking with root-cause attribution, and episode-based recovery gating with at-most-once execution semantics. These four capabilities correspond directly to the four gaps identified in Section~4.7.
+The qualitative comparison shows that prism-police provides four capabilities absent in both Prometheus and Nagios: runtime root-cause analysis with dependency traversal, automatic transitive suppression of downstream symptoms, persistent fault tracking with root-cause attribution, and episode-based recovery gating with at-most-once execution semantics. These four capabilities correspond directly to the four gaps identified in Section~\ref{sec:lit-summary}.
 
-Prometheus and Nagios provide capabilities that prism-police does not: graphical dashboards, historical data storage, notification routing, and integration with broad ecosystems of exporters and plugins. These capabilities are outside the scope of the \gls{fdir} framework (Section~5.1.3) but are relevant for operational deployment. A production deployment would likely combine prism-police for \gls{fdir} coordination with an external monitoring tool for visualisation and long-term telemetry storage.
+Prometheus and Nagios provide capabilities that prism-police does not: graphical dashboards, historical data storage, notification routing, and integration with broad ecosystems of exporters and plugins. These capabilities are outside the scope of the \gls{fdir} framework (Section~\ref{sec:scope-boundaries}) but are relevant for operational deployment. A production deployment would likely combine prism-police for \gls{fdir} coordination with an external monitoring tool for visualisation and long-term telemetry storage.
 
-\subsection{Requirements Validation}
+\subsection{Requirements Validation}\label{sec:requirements-validation}
 
-This section evaluates each functional and non-functional requirement against the combined evidence from unit tests (Chapter~6), quantitative experiments (Section~7.2), and qualitative analysis (Section~7.3). Table~7.5 summarises the validation status and supporting evidence for each requirement. All eight functional requirements are validated. Nine of eleven non-functional requirements are validated; NFR4 (bounded resource usage) and NFR5 (timely fault handling) are partially validated due to the absence of long-duration soak testing and production-platform latency measurements, respectively.
+This section evaluates each functional and non-functional requirement against the combined evidence from unit tests (Chapter~\ref{chap:implementation}), quantitative experiments (Section~\ref{sec:quantitative-results}), and qualitative analysis (Section~\ref{sec:qualitative-comparison}). Table~\ref{tab:req-validation} summarises the validation status and supporting evidence for each requirement. All eight functional requirements are validated. Nine of eleven non-functional requirements are validated; NFR4 (bounded resource usage) and NFR5 (timely fault handling) are partially validated due to the absence of long-duration soak testing and production-platform latency measurements, respectively.
 \FloatBarrier
 \begin{table}[htbp]
 \centering
@@ -265,13 +265,13 @@ NFR11 & Validated & T22, T30 \\
 \end{tabular}
 \end{table}
 
-\subsection{Discussion}
+\subsection{Discussion}\label{sec:eval-discussion}
 
 \subsubsection{Addressing the Research Gap}
 
-The literature review (Chapter~4) identified four recurring gaps: (1) the absence of runtime fault episode tracking, (2) the lack of dependency-aware recovery coordination, (3) the missing enforcement of at-most-once recovery execution per fault episode, and (4) the reliance on computational methods unsuitable for embedded platforms. The evaluation provides evidence that the prototype addresses each gap:
+The literature review (Chapter~\ref{chap:literature-review-results}) identified four recurring gaps: (1) the absence of runtime fault episode tracking, (2) the lack of dependency-aware recovery coordination, (3) the missing enforcement of at-most-once recovery execution per fault episode, and (4) the reliance on computational methods unsuitable for embedded platforms. The evaluation provides evidence that the prototype addresses each gap:
 
-Gap (1) is addressed by the episode model. The E1 scenario demonstrates that a 300-second sustained fault generates exactly one alert, compared to 176 (Prometheus) and 298 (Nagios). This reduction is a direct consequence of the rising-edge detection (Section~5.4.2) and episode lifecycle management (Section~5.6.2) that group repeated observations into a single episode. Unit tests T02, T15, T34, and T35 verify the episode lifecycle under various conditions.
+Gap (1) is addressed by the episode model. The E1 scenario demonstrates that a 300-second sustained fault generates exactly one alert, compared to 176 (Prometheus) and 298 (Nagios). This reduction is a direct consequence of the rising-edge detection (Section~\ref{sec:rule-state-tracking}) and episode lifecycle management (Section~\ref{sec:episode-lifecycle}) that group repeated observations into a single episode. Unit tests T02, T15, T34, and T35 verify the episode lifecycle under various conditions.
 
 Gap (2) is addressed by the dependency graph and root-cause analysis. The E2 scenario demonstrates that a four-service cascading fault generates one alert (for the root cause) rather than four independent alerts. Unit tests T04, T23, T24, and T29 verify that root-cause traversal correctly identifies the deepest active upstream fault across multi-layer dependency chains.
 
@@ -303,17 +303,17 @@ A fair operational comparison would require deploying prism-police alongside a m
 
 Two non-functional requirements remain partially validated, and this represents the primary open validation gap of the thesis.
 
-As discussed in Section~5.6.3, entries for ended episodes can be safely removed because episode IDs are monotonically increasing and never reused; implementing this pruning would bound the set's size to the number of concurrently active episodes rather than the cumulative total.
+As discussed in Section~\ref{sec:at-most-once}, entries for ended episodes can be safely removed because episode IDs are monotonically increasing and never reused; implementing this pruning would bound the set's size to the number of concurrently active episodes rather than the cumulative total.
 
 NFR5 (timely fault handling) is supported by the 100ms polling interval, which establishes a theoretical detection latency floor, and by the proxy measurement in T17 (below 1 second in the unit test environment). However, end-to-end latency from telemetry sample publication on the message bus through \gls{fdir} processing to resolution script completion has not been measured on the target platform under production load. The 100ms polling interval, message bus delivery latency, \gls{netconf} processing overhead, and fork+exec resolution cost may combine to produce detection-to-resolution latencies that exceed acceptable bounds on resource-constrained hardware. This measurement requires deployment on the actual router platform and is identified as future work.
 
-\subsection{Research Question Evaluation}
+\subsection{Research Question Evaluation}\label{sec:rq-evaluation}
 
-This section maps the evaluation evidence to the five research questions defined in Chapter~3.
+This section maps the evaluation evidence to the five research questions defined in Chapter~\ref{chap:methodology}.
 
 RQ1: How can faults in \gls{soa}-based industrial routers be systematically characterised to support precise detection, isolation, and recovery under embedded system constraints?
 
-The framework characterises faults through threshold-based rule evaluation on structured telemetry samples, with rising-edge detection that distinguishes new violations from ongoing observations. The evaluation demonstrates correct detection across single-fault (E1), cascading-fault (E2), and storm (E3) scenarios. Unit tests T01, T02, T30, T32, and T35--T41 verify detection correctness under various conditions. The characterisation is limited to single-threshold comparisons on float values; multi-condition rules and graduated severity are not implemented (Section~6.10.1). The conceptual design defines a six-level severity model (Section~5.4.3), but the prototype implements a simplified uniform-severity assignment where all detected faults receive \texttt{Severity::Critical}. Graduated severity assignment based on threshold proximity, violation duration, or fault type as proposed in the recovery-oriented taxonomy of Vitucci et al.~\cite{ref1,ref2} is designed as an extension point but not realised in the current prototype. The evaluation therefore validates fault detection and episode tracking but does not validate severity-differentiated recovery selection.
+The framework characterises faults through threshold-based rule evaluation on structured telemetry samples, with rising-edge detection that distinguishes new violations from ongoing observations. The evaluation demonstrates correct detection across single-fault (E1), cascading-fault (E2), and storm (E3) scenarios. Unit tests T01, T02, T30, T32, and T35--T41 verify detection correctness under various conditions. The characterisation is limited to single-threshold comparisons on float values; multi-condition rules and graduated severity are not implemented (Section~\ref{sec:impl-limitations}). The conceptual design defines a six-level severity model (Section~\ref{sec:fault-record-creation}), but the prototype implements a simplified uniform-severity assignment where all detected faults receive \texttt{Severity::Critical}. Graduated severity assignment based on threshold proximity, violation duration, or fault type as proposed in the recovery-oriented taxonomy of Vitucci et al.~\cite{ref1,ref2} is designed as an extension point but not realised in the current prototype. The evaluation therefore validates fault detection and episode tracking but does not validate severity-differentiated recovery selection.
 
 RQ2: How can telemetry in industrial routers be organised into a coherent model that enables stateful fault tracking across time and supports root cause localisation under bounded resource constraints?
 
@@ -321,17 +321,17 @@ The telemetry model organises data into definitions, rules, and samples, deliver
 
 RQ3: How should service dependencies in industrial routers be represented to enable deterministic reasoning about failure propagation and to identify causal relationships between service malfunctions?
 
-Dependencies are represented as a directed graph derived from rule declarations, with forward edges for root-cause traversal and reverse edges for transitive impact computation. The evaluation demonstrates correct root-cause identification in three-layer chains (T04), four-layer chains (T23), partial chains (T24), cyclic graphs (T05), and diamond topologies (diamond tests). The dependency model is static (declared in configuration) and does not support runtime discovery. All dependency types are treated uniformly without distinguishing mandatory from optional dependencies (Section~5.5.1).
+Dependencies are represented as a directed graph derived from rule declarations, with forward edges for root-cause traversal and reverse edges for transitive impact computation. The evaluation demonstrates correct root-cause identification in three-layer chains (T04), four-layer chains (T23), partial chains (T24), cyclic graphs (T05), and diamond topologies (diamond tests). The dependency model is static (declared in configuration) and does not support runtime discovery. All dependency types are treated uniformly without distinguishing mandatory from optional dependencies (Section~\ref{sec:dependency-graph-structure}).
 
 RQ4: Which deterministic recovery strategies are suitable for industrial routers, and how can episode-aware recovery coordination prevent redundant recovery actions, oscillations, and collateral disruption?
 
-The framework implements external script execution as the recovery strategy, with episode-aware gating (at-most-once per episode), root-cause-only resolution, and transitive suppression of downstream impacts. The E1 and E2 scenarios demonstrate that recovery executes once regardless of fault duration or the number of affected services. Unit tests T06, T15, T21, T25, T27, and T34 verify the recovery coordination mechanisms. The framework does not implement recovery retry, alternative strategies, or graduated recovery (Section~6.10.1).
+The framework implements external script execution as the recovery strategy, with episode-aware gating (at-most-once per episode), root-cause-only resolution, and transitive suppression of downstream impacts. The E1 and E2 scenarios demonstrate that recovery executes once regardless of fault duration or the number of affected services. Unit tests T06, T15, T21, T25, T27, and T34 verify the recovery coordination mechanisms. The framework does not implement recovery retry, alternative strategies, or graduated recovery (Section~\ref{sec:impl-limitations}).
 
 RQ5: How can fault characterisation, telemetry modelling, dependency representation, and recovery strategies be integrated into a stateful \gls{fdir} architecture that coordinates root cause recovery and suppresses dependent symptom faults?
 
 The integrated architecture composes seven components into a seven-phase processing pipeline that unifies detection, dependency reasoning, episode tracking, and recovery coordination. The E2 scenario provides end-to-end evidence: a single root-cause fault propagates to three dependent services; the framework detects all four faults, identifies the root cause, executes resolution once, suppresses the three symptoms, and records a persistent fault if the root cause persists. Test T45 verifies this complete pipeline with a four-layer chain under realistic multi-rate sampling conditions. The qualitative comparison (Table~7.4) confirms that this integration is absent in both Prometheus and Nagios.
 
-\subsection{Threats to Validity}
+\subsection{Threats to Validity}\label{sec:threats-validity}
 
 \subsubsection{Internal Validity}
 
@@ -351,14 +351,14 @@ The comparison with Prometheus and Nagios measures alert volume, CPU, and memory
 
 The alert count metric for prism-police (1 in E1 and E2) reflects the episode model's design: one alert per episode. Whether this level of alert reduction is operationally appropriate --- or whether operators require more granular notification --- is a deployment-specific question not addressed by this evaluation.
 
-\subsection{Limitations}
+\subsection{Limitations}\label{sec:eval-limitations}
 
 \begin{enumerate}
 \item No production-platform evaluation. All experiments were conducted on desktop-class hardware in Docker containers. The Docker-based environment used for evaluation is the same environment used for development and simulation of the PRISM platform; it replicates the \gls{soa} service structure and message bus topology but does not reproduce the hardware constraints of the target router. Resource consumption on the actual Belden/Hirschmann PRISM router platform was not measured. The 100\,ms polling interval, fork+exec resolution overhead, and memory consumption may behave differently on embedded ARM or MIPS processors with limited cache and memory bandwidth. Additionally, the evaluation host does not carry production network traffic; on the target router, CPU and memory are shared with software-based packet processing (e.g., WLAN forwarding), which competes for the same resources and may affect FDIR processing latency and memory availability under real operating conditions.
 
 \item NFR4 not fully validated. Bounded resource usage over extended operational periods (days, weeks) was not tested. The placeholder test T16 does not perform actual memory profiling. Whether the \texttt{resolvedEpisodes} set, \texttt{persistentFaults} vector, or other tracking structures grow unboundedly over long operation remains unverified. NFR5 not validated under production conditions. Detection-to-resolution latency was measured only as a proxy in the unit test environment. The 100ms polling interval establishes a theoretical floor, but actual latency including message bus delivery, \gls{netconf} processing, and resolution script execution was not measured end-to-end on the target platform.
 
-\item The \texttt{resolvedEpisodes} set and \texttt{persistentFaults} vector grow monotonically in the prototype because the pruning mechanism described in Section~5.6.3 is not implemented.
+\item The \texttt{resolvedEpisodes} set and \texttt{persistentFaults} vector grow monotonically in the prototype because the pruning mechanism described in Section~\ref{sec:at-most-once} is not implemented.
 
 \item No dashboard or operator interface. The prototype exposes persistent faults via \gls{netconf} but does not provide a graphical interface. The qualitative comparison (Table~7.4) identifies this as a gap relative to Prometheus and Nagios.
 
@@ -367,14 +367,14 @@ The alert count metric for prism-police (1 in E1 and E2) reflects the episode mo
 \item No combined deployment evaluation. The operational scenario of deploying prism-police alongside a monitoring tool (e.g., Prometheus for visualisation) was not tested.
 \end{enumerate}
 
-\subsection{Summary}
+\subsection{Summary}\label{sec:eval-summary}
 
-This chapter evaluated the stateful \gls{fdir} prototype against the requirements defined in Section~5.2 and the research questions formulated in Chapter~3, using unit test results, quantitative experiments, and a qualitative comparison with Prometheus and Nagios.
+This chapter evaluated the stateful \gls{fdir} prototype against the requirements defined in Section~\ref{sec:requirements-principles} and the research questions formulated in Chapter~\ref{chap:methodology}, using unit test results, quantitative experiments, and a qualitative comparison with Prometheus and Nagios.
 
 The unit test suite (47 tests plus diamond dependency tests) validates all eight functional requirements and nine of eleven non-functional requirements: resource measurements are within expected bounds for all tested scenarios, but long-duration soak testing and production-platform latency measurements were not performed.
 
 The quantitative experiments demonstrate three measurable outcomes. First, the episode model and suppression mechanism reduce alert volume by two to five orders of magnitude compared to Prometheus and Nagios under sustained fault conditions (1 alert vs. 176--298 in E1; 1 vs. 666--1,201 in E2). Second, CPU utilisation under storm conditions (E3-1000) is 77.49\% of a single core for prism-police, compared to 313.83\% for Prometheus and 1,035.97\% for Nagios. Third, memory consumption remains between 13.92 and 29.37 MB across all scenarios, compared to 196--374 MB for Prometheus and 6.70--41.40 MB for Nagios.
 
-The qualitative comparison identifies four capabilities present in prism-police but absent in both reference systems: runtime root-cause analysis with dependency traversal, automatic transitive suppression of downstream symptoms, persistent fault tracking with root-cause attribution, and episode-based recovery gating with at-most-once execution semantics. These four capabilities correspond directly to the four gaps identified in the literature review (Section~4.7).
+The qualitative comparison identifies four capabilities present in prism-police but absent in both reference systems: runtime root-cause analysis with dependency traversal, automatic transitive suppression of downstream symptoms, persistent fault tracking with root-cause attribution, and episode-based recovery gating with at-most-once execution semantics. These four capabilities correspond directly to the four gaps identified in the literature review (Section~\ref{sec:lit-summary}).
 
 The evaluation is limited by the use of desktop-class hardware, single-run measurements, synthetic fault scenarios, and the absence of production-platform validation. These limitations define the boundary of the current evaluation and identify directions for future validation work.

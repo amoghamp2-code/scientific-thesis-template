@@ -1,32 +1,32 @@
 This chapter summarises the contributions of the thesis, provides condensed answers to the five research questions, consolidates the limitations identified across the preceding chapters, and identifies directions for future work.
 
-\section{Summary of Contributions}
+\section{Summary of Contributions}\label{sec:contributions}
 
-This thesis presented the design, implementation, and evaluation of a stateful \gls{fdir} framework for \gls{soa}-based industrial routers. The framework addresses four gaps identified in the literature review (Section~4.7): (1) the absence of runtime fault episode tracking that distinguishes new faults from ongoing violations, (2) the lack of dependency-aware recovery coordination that differentiates root causes from downstream symptoms, (3) the missing enforcement of at-most-once recovery execution per fault episode, and (4) the reliance on computational methods unsuitable for embedded platforms.
+This thesis presented the design, implementation, and evaluation of a stateful \gls{fdir} framework for \gls{soa}-based industrial routers. The framework addresses four gaps identified in the literature review (Section~\ref{sec:lit-summary}): (1) the absence of runtime fault episode tracking that distinguishes new faults from ongoing violations, (2) the lack of dependency-aware recovery coordination that differentiates root causes from downstream symptoms, (3) the missing enforcement of at-most-once recovery execution per fault episode, and (4) the reliance on computational methods unsuitable for embedded platforms.
 
 The central contribution is the fault episode model a runtime entity that groups related fault observations into coherent episodes, governs when recovery actions may execute, and coordinates suppression of dependent symptoms. This model is integrated with a directed service dependency graph, rule-based threshold detection with rising-edge transition tracking, root-cause-only resolution via external scripts, transitive impact suppression using sample-count-based windows, and persistent fault escalation through \gls{yang}/\gls{netconf} operational state.
 
-The prototype (\texttt{prism-police}) implements this framework as a C++20 application on the Belden\allowbreak/\allowbreak Hirschmann PRISM industrial router platform. A structured test suite of 47 unit tests plus diamond dependency tests validates all eight functional requirements and nine of eleven non-functional requirements. Quantitative experiments demonstrate that the episode model reduces alert volume by two to five orders of magnitude compared to Prometheus and Nagios under sustained fault conditions in single-run experiments, while maintaining CPU utilisation at 77.49\% of a single core and memory consumption between 13.92 and 29.37 MB at ingestion rates of up to 1{,}000 samples per second. The at-most-once recovery execution guarantee is verified through unit tests (T15, T34); the quantitative experiments measure alert volume reduction rather than recovery action counts directly.
+The prototype (\texttt{prism-police}) implements this framework as a C++20 application on the Belden\allowbreak/\allowbreak Hirschmann PRISM industrial router platform. A structured test suite of 47 unit tests plus diamond dependency tests validates all eight functional requirements and nine of eleven non-functional requirements. Quantitative experiments demonstrate that the episode model reduces alert volume by two to five orders of magnitude compared to Prometheus and Nagios under sustained fault conditions in single-run experiments, while maintaining \gls{cpu} utilisation at 77.49\% of a single core and memory consumption between 13.92 and 29.37 MB at ingestion rates of up to 1{,}000 samples per second. The at-most-once recovery execution guarantee is verified through unit tests (T15, T34); the quantitative experiments measure alert volume reduction rather than recovery action counts directly.
 
 The framework's conceptual architecture is designed to be platform-independent: all behaviour is defined through declarative \gls{yang}/\gls{netconf} configuration with no hardcoded service logic. However, the prototype and evaluation are conducted exclusively on the PRISM platform. Cross-platform applicability is a design property that has not been empirically validated.
 
-\section{Answers to Research Questions}
+\section{Answers to Research Questions}\label{sec:rq-answers}
 
-The following provides condensed answers to each research question. Detailed evidence and test references are provided in Section~7.6.
+The following provides condensed answers to each research question. Detailed evidence and test references are provided in Section~\ref{sec:rq-evaluation}.
 
-\textbf{RQ1 (Fault characterisation):} The framework characterises faults through threshold-based rule evaluation with rising-edge detection that distinguishes new violations from ongoing observations (Section~5.4). Detection correctness is verified across all evaluation scenarios (E1--E3) and by 11 unit tests. The characterisation is limited to single-threshold float comparisons; multi-condition rules and graduated severity are not implemented. The conceptual design includes a six-level severity model, but the prototype assigns all faults uniformly as Critical. Severity-differentiated recovery selection remains an open extension point.
+\textbf{RQ1 (Fault characterisation):} The framework characterises faults through threshold-based rule evaluation with rising-edge detection that distinguishes new violations from ongoing observations (Section~\ref{sec:rule-based-detection}). Detection correctness is verified across all evaluation scenarios (E1--E3) and by 11 unit tests. The characterisation is limited to single-threshold float comparisons; multi-condition rules and graduated severity are not implemented. The conceptual design includes a six-level severity model, but the prototype assigns all faults uniformly as Critical. Severity-differentiated recovery selection remains an open extension point.
 
-\textbf{RQ2 (Telemetry model):} Telemetry is organised into definitions, rules, and samples delivered through \gls{yang}/\gls{netconf} and the message bus (Section~5.3). A bounded event queue and sample-driven processing ensure resource-bounded operation, with memory consumption between 13.92 and 29.37 MB across all tested scenarios. Long-duration resource verification remains open.
+\textbf{RQ2 (Telemetry model):} Telemetry is organised into definitions, rules, and samples delivered through \gls{yang}/\gls{netconf} and the message bus (Section~\ref{sec:telemetry-model}). A bounded event queue and sample-driven processing ensure resource-bounded operation, with memory consumption between 13.92 and 29.37 MB across all tested scenarios. Long-duration resource verification remains open.
 
-\textbf{RQ3 (Dependency representation):} Dependencies are represented as a directed graph with forward edges for root-cause traversal and reverse edges for transitive impact computation (Section~5.5). Correct root-cause identification is demonstrated across linear chains, partial chains, cyclic graphs, and diamond topologies. The model is static and does not distinguish dependency types.
+\textbf{RQ3 (Dependency representation):} Dependencies are represented as a directed graph with forward edges for root-cause traversal and reverse edges for transitive impact computation (Section~\ref{sec:dependency-model}). Correct root-cause identification is demonstrated across linear chains, partial chains, cyclic graphs, and diamond topologies. The model is static and does not distinguish dependency types.
 
 \textbf{RQ4 (Recovery coordination):} Episode-aware gating enforces at-most-once resolution per episode, root-cause-only execution prevents cascading recovery, and transitive suppression prevents redundant downstream actions (Sections~5.6, 5.7). The E1 and E2 scenarios confirm single-resolution behaviour under sustained and cascading fault conditions. Recovery retry and alternative strategies are not implemented.
 
-\textbf{RQ5 (Integrated architecture):} The seven-component, seven-phase processing pipeline unifies detection, dependency reasoning, episode tracking, and recovery coordination into a single runtime system (Section~5.8). Test T45 verifies the complete pipeline end-to-end. The qualitative comparison (Table~7.4) confirms that this integration is absent in both Prometheus and Nagios.
+\textbf{RQ5 (Integrated architecture):} The seven-component, seven-phase processing pipeline unifies detection, dependency reasoning, episode tracking, and recovery coordination into a single runtime system (Section~\ref{sec:integrated-architecture}). Test T45 verifies the complete pipeline end-to-end. The qualitative comparison (Table~\ref{tab:qualitative-comparison}) confirms that this integration is absent in both Prometheus and Nagios.
 
-\section{Limitations}
+\section{Limitations}\label{sec:conclusion-limitations}
 
-The following limitations apply to the thesis as a whole, consolidated from the conception (Section~5.9), prototype (Section~6.10), and evaluation (Section~7.8):
+The following limitations apply to the thesis as a whole, consolidated from the conception (Section~\ref{sec:conception-summary}), prototype (Section~\ref{sec:impl-limitations}), and evaluation (Section~\ref{sec:eval-limitations}):
 
 \begin{enumerate}
 \item Single-platform validation. The prototype is implemented and evaluated exclusively on the Belden/Hirschmann PRISM platform. Cross-platform applicability is a design property (declarative configuration, no hardcoded service logic) but has not been empirically demonstrated on other router platforms.
@@ -45,22 +45,22 @@ The following limitations apply to the thesis as a whole, consolidated from the 
 
 \item Synthetic evaluation scenarios only. The evaluation uses injected faults.
 
-\item The \texttt{resolvedEpisodes} set and \texttt{persistentFaults} vector grow monotonically in the prototype because the pruning mechanism described in Section~5.6.3 is not implemented.
+\item The \texttt{resolvedEpisodes} set and \texttt{persistentFaults} vector grow monotonically in the prototype because the pruning mechanism described in Section~\ref{sec:at-most-once} is not implemented.
 \end{enumerate}
 
-\section{Future Work}
+\section{Future Work}\label{sec:future-work}
 
 The following items are identified as directions for future work, ordered by priority:
 
 \begin{enumerate}
 \item Production-platform validation.  
-Deploy the prototype on the actual Belden/Hirschmann PRISM router hardware and measure CPU utilisation, memory consumption, and detection-to-resolution latency under production telemetry loads. This is the highest-priority item, as it would validate NFR4 and NFR5 on the target platform.
+Deploy the prototype on the actual Belden/Hirschmann PRISM router hardware and measure \gls{cpu} utilisation, memory consumption, and detection-to-resolution latency under production telemetry loads. This is the highest-priority item, as it would validate NFR4 and NFR5 on the target platform.
 
 \item Long-duration soak testing.  
 Run the prototype continuously for extended periods (days to weeks) with memory profiling to verify that tracking structures remain bounded and that no memory leaks occur.
 
 \item Cross-platform deployment.  
-Deploy the framework on a second SOA-based router platform to validate the generality claim. This would require adapting only the platform integration layers (\texttt{PrismPoliceCallbacks}, \texttt{PrismPoliceConfigCache}) while retaining the core FDIR components unchanged.
+Deploy the framework on a second \gls{soa}-based router platform to validate the generality claim. This would require adapting only the platform integration layers (\texttt{PrismPoliceCallbacks}, \texttt{PrismPoliceConfigCache}) while retaining the core \gls{fdir} components unchanged.
 
 \item Graduated severity assignment.  
 Implement severity differentiation based on threshold proximity, violation duration, or other criteria, enabling severity-based recovery action selection as proposed in~\cite{Vitucci2022COMPSAC}.
@@ -69,7 +69,7 @@ Implement severity differentiation based on threshold proximity, violation durat
 Implement configurable retry policies and alternative resolution scripts for persistent faults, reducing the reliance on external escalation for faults that require multiple recovery attempts.
 
 \item Resolution script sandboxing.  
-Add resource limits (CPU time, memory, execution timeout) to resolution script execution to prevent misbehaving scripts from affecting router operation.
+Add resource limits (\gls{cpu} time, memory, execution timeout) to resolution script execution to prevent misbehaving scripts from affecting router operation.
 
 \item Operator dashboard integration.  
 Develop a web-based or \gls{netconf}-integrated dashboard that visualises active episodes, dependency graphs, suppression state, and persistent faults, or integrate with existing monitoring tools (e.g., Prometheus/Grafana) for visualisation.

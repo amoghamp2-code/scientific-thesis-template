@@ -1,31 +1,31 @@
-The literature review in Chapter 4 established that existing research provides mature foundations for fault classification, telemetry, dependency modelling, and recovery in distributed and service-oriented systems, but addresses these concerns largely in isolation and under assumptions that do not hold for resource-constrained industrial routers. Four recurring gaps were identified: (1) the absence of runtime fault episode tracking that distinguishes new faults from ongoing violations (Section 4.1), (2) the lack of dependency-aware recovery coordination that differentiates root causes from downstream symptoms (Section 4.2), (3) the missing enforcement of at-most-once recovery execution per fault episode (Section 4.4), and (4) the predominant reliance on computational methods unsuitable for embedded platforms (Sections 4.2, 4.5). Regarding gap (4), deterministic failover mechanisms for embedded systems do exist in the literature notably in the automotive domain \cite{ref23,ref24,ref25} but these focus on task-level migration under AUTOSAR constraints rather than on service-dependency-aware episode management across \gls{soa}-resident router services. The gap therefore concerns not the complete absence of embedded-suitable methods, but the absence of such methods that integrate episode tracking with dependency-coordinated recovery.
+The literature review in Chapter~\ref{chap:literature-review-results} established that existing research provides mature foundations for fault classification, telemetry, dependency modelling, and recovery in distributed and service-oriented systems, but addresses these concerns largely in isolation and under assumptions that do not hold for resource-constrained industrial routers. Four recurring gaps were identified: (1) the absence of runtime fault episode tracking that distinguishes new faults from ongoing violations (Section~\ref{sec:lit-fault-models}), (2) the lack of dependency-aware recovery coordination that differentiates root causes from downstream symptoms (Section~\ref{sec:lit-dependency-modelling}), (3) the missing enforcement of at-most-once recovery execution per fault episode (Section~\ref{sec:lit-fdir-recovery}), and (4) the predominant reliance on computational methods unsuitable for embedded platforms (Sections~\ref{sec:lit-dependency-modelling},~\ref{sec:lit-ml-vs-deterministic}). Regarding gap (4), deterministic failover mechanisms for embedded systems do exist in the literature notably in the automotive domain \cite{ref23,ref24,ref25} but these focus on task-level migration under AUTOSAR constraints rather than on service-dependency-aware episode management across \gls{soa}-resident router services. The gap therefore concerns not the complete absence of embedded-suitable methods, but the absence of such methods that integrate episode tracking with dependency-coordinated recovery.
 
-This chapter presents the conceptual design of a stateful Fault Detection, Isolation, and Recovery (\gls{fdir}) framework that addresses these gaps. The framework is designed for \gls{soa}-based industrial routers and integrates fault characterisation, structured telemetry, service dependency modelling, fault episode management, and deterministic recovery coordination into a single cohesive architecture. Each section of this chapter corresponds to one or more research questions defined in Chapter 3 and builds directly on the foundations and limitations identified in the literature review.
+This chapter presents the conceptual design of a stateful Fault Detection, Isolation, and Recovery (\gls{fdir}) framework that addresses these gaps. The framework is designed for \gls{soa}-based industrial routers and integrates fault characterisation, structured telemetry, service dependency modelling, fault episode management, and deterministic recovery coordination into a single cohesive architecture. Each section of this chapter corresponds to one or more research questions defined in Chapter~\ref{chap:methodology} and builds directly on the foundations and limitations identified in the literature review.
 
-The chapter begins by defining the architectural placement of the \gls{fdir} system relative to the \gls{soa} it monitors, then establishes the requirements and design principles the overarching constraints that govern all subsequent architectural and algorithmic decisions (defined in Section 5.2.4) that guide the framework, before proceeding through the processing pipeline: telemetry ingestion, dependency-ordered evaluation, rule-based fault detection, episode lifecycle management, root cause analysis, resolution execution, and impact-aware suppression. The chapter concludes with the integrated architecture (Section 5.8), which composes the individually defined components into a single coordinated runtime system that executes the complete \gls{fdir} cycle from telemetry ingestion through resolution and suppression within one processing loop.
+The chapter begins by defining the architectural placement of the \gls{fdir} system relative to the \gls{soa} it monitors, then establishes the requirements and design principles the overarching constraints that govern all subsequent architectural and algorithmic decisions (defined in Section~\ref{sec:design-principles}) that guide the framework, before proceeding through the processing pipeline: telemetry ingestion, dependency-ordered evaluation, rule-based fault detection, episode lifecycle management, root cause analysis, resolution execution, and impact-aware suppression. The chapter concludes with the integrated architecture (Section~\ref{sec:integrated-architecture}), which composes the individually defined components into a single coordinated runtime system that executes the complete \gls{fdir} cycle from telemetry ingestion through resolution and suppression within one processing loop.
 
-\section{Architectural Placement and Scope}
+\section{Architectural Placement and Scope}\label{sec:placement-scope}
 
 A fundamental design decision for any fault management system operating within a service-oriented environment is its architectural placement: whether the \gls{fdir} framework resides inside the \gls{soa} as a participating service or outside the \gls{soa} as an external supervisor. This decision determines the framework's access to telemetry, its ability to execute recovery actions, its own susceptibility to the faults it monitors, and its integration with existing management workflows.
 
-\subsection{Placement Options}
+\subsection{Placement Options}\label{sec:placement-options}
 
-\textbf{Option 1: FDIR as an Internal SOA Service.}
+\textbf{Option 1: \gls{fdir} as an Internal \gls{soa} Service.}
 
 The \gls{fdir} framework is deployed as a regular service within the \gls{soa}, subject to the same service contracts and lifecycle management as other router services. In the general case, this means the \gls{fdir} service communicates through whatever inter-service communication mechanism the \gls{soa} provides a shared message bus, a publish-subscribe broker, or a similar infrastructure service and receives its configuration through the platform's standard management interface. On the target platform (Belden/Hirschmann PRISM), these mechanisms are concretely realised as a ZeroMQ-based message bus and a \gls{yang}/\gls{netconf} configuration engine; other \gls{soa}-based router platforms may provide equivalent functionality through different technologies. This placement offers natural integration: the \gls{fdir} service can subscribe to telemetry events, receive configuration through the existing management interface, and participate in the platform's service lifecycle. The primary advantage is that the framework benefits from all existing \gls{soa} infrastructure configuration management, service discovery, inter-service communication, and lifecycle coordination without requiring dedicated interfaces. The primary risk is that the \gls{fdir} framework is itself subject to the failure modes it monitors: a failure in the shared communication infrastructure affects the \gls{fdir} service alongside the services it monitors.
 
-\textbf{Option 2: FDIR as an External Supervisor.}
+\textbf{Option 2: \gls{fdir} as an External Supervisor.}
 
-The \gls{fdir} framework operates entirely outside the \gls{soa} boundary, observing the system through dedicated monitoring interfaces or out-of-band telemetry channels. This placement provides independence from \gls{soa}-internal failures but limits the framework's visibility into service-internal state and its ability to leverage existing \gls{soa} infrastructure for configuration and telemetry delivery. Interacting with services requires separate communication paths, increasing integration effort and duplicating interface definitions that already exist within the \gls{soa}. Additionally, out-of-band communication channels may introduce latency that is difficult to bound, potentially preventing the framework from meeting the real-time constraints required for timely fault detection and recovery in industrial environments (Section 2.7).
+The \gls{fdir} framework operates entirely outside the \gls{soa} boundary, observing the system through dedicated monitoring interfaces or out-of-band telemetry channels. This placement provides independence from \gls{soa}-internal failures but limits the framework's visibility into service-internal state and its ability to leverage existing \gls{soa} infrastructure for configuration and telemetry delivery. Interacting with services requires separate communication paths, increasing integration effort and duplicating interface definitions that already exist within the \gls{soa}. Additionally, out-of-band communication channels may introduce latency that is difficult to bound, potentially preventing the framework from meeting the real-time constraints required for timely fault detection and recovery in industrial environments (Section~\ref{sec:router-constraints}).
 
-\subsection{Chosen Approach and Justification}
+\subsection{Chosen Approach and Justification}\label{sec:chosen-approach}
 
 This framework adopts the internal \gls{soa} service model (Option 1). The justification is based on three considerations derived from the constraints and characteristics of the target platform.
 
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\textwidth]{fdir-placement-within-soa.png}
-  \caption{FDIR placement within SOA}
+  \caption{\gls{fdir} placement within \gls{soa}}
   \label{fig:fdir-placement-within-soa}
 \end{figure}
 
@@ -39,13 +39,13 @@ The acknowledged trade-off of this placement is that the \gls{fdir} framework de
 
 \textbf{Limitation:} The framework cannot detect or recover from failures in the message bus or \gls{netconf} subsystem on which it depends. This is an inherent constraint of the internal-service placement and is not addressed by the current design.
 
-\subsection{Scope and Boundaries}
+\subsection{Scope and Boundaries}\label{sec:scope-boundaries}
 
 The \gls{fdir} framework monitors and manages faults within the following scope:
 
 \begin{itemize}
 \item \textbf{Service-level faults} Performance degradations, threshold violations, and state anomalies in router-resident \gls{soa} services, as reported through telemetry samples published to the message bus.
-\item \textbf{Inter-service faults:} Failures that propagate along declared dependency chains between services. The framework does not directly observe inter-service communication; instead, it detects inter-service faults indirectly by correlating telemetry symptoms in downstream services with the dependency graph. When a downstream service reports a threshold violation and its declared upstream dependency is also in a fault state, the framework classifies the downstream fault as a propagated symptom rather than an independent root cause (Section 5.5.3).
+\item \textbf{Inter-service faults:} Failures that propagate along declared dependency chains between services. The framework does not directly observe inter-service communication; instead, it detects inter-service faults indirectly by correlating telemetry symptoms in downstream services with the dependency graph. When a downstream service reports a threshold violation and its declared upstream dependency is also in a fault state, the framework classifies the downstream fault as a propagated symptom rather than an independent root cause (Section~\ref{sec:root-cause-analysis}).
 \item \textbf{Resource-level faults:} \gls{cpu}, memory, and other platform resource violations that affect service operation, as observable through system-level telemetry.
 \item \textbf{Network-interface faults:} Link state changes, signal degradation, and connectivity losses reported by network management services.
 \end{itemize}
@@ -59,13 +59,13 @@ The framework does not manage:
 \item Faults in services that do not publish telemetry to the monitored message bus topic.
 \end{itemize}
 
-\section{Requirements and Design Principles}
+\section{Requirements and Design Principles}\label{sec:requirements-principles}
 
-The design of the \gls{fdir} framework is driven by functional requirements derived from the problem definition in Chapter 1 and non-functional requirements derived from the industrial router constraints identified in Section 2.7. This section defines both sets of requirements, establishes their interdependencies, and derives the overarching design principles that guide every subsequent design decision in this chapter.
+The design of the \gls{fdir} framework is driven by functional requirements derived from the problem definition in Chapter~\ref{chap:introduction} and non-functional requirements derived from the industrial router constraints identified in Section~\ref{sec:router-constraints}. This section defines both sets of requirements, establishes their interdependencies, and derives the overarching design principles that guide every subsequent design decision in this chapter.
 
-\subsection{Functional Requirements}
+\subsection{Functional Requirements}\label{sec:functional-requirements}
 
-Functional requirements specify what the framework must do the capabilities and behaviours it must provide. Non-functional requirements (Section 5.2.2) specify how well the framework must perform the quality attributes and constraints it must satisfy. This distinction follows the standard requirements engineering terminology used in software and systems engineering.
+Functional requirements specify what the framework must do the capabilities and behaviours it must provide. Non-functional requirements (Section~\ref{sec:non-functional-requirements}) specify how well the framework must perform the quality attributes and constraints it must satisfy. This distinction follows the standard requirements engineering terminology used in software and systems engineering.
 
 The functional requirements define what the framework must accomplish to address the gaps identified in the literature review. Each requirement is traceable to a specific gap or research question.
 
@@ -77,21 +77,21 @@ The functional requirements define what the framework must accomplish to address
 \toprule
 ID & Functional Requirement & Derived From & Design Decision \\
 \midrule
-FR1 & Detect failure states in individual system layers & RQ1; gap in Section 4.1 (taxonomies lack runtime detection semantics) & Telemetry-driven rule evaluation; episode tracking per telemetry source \\
-FR2 & Model interdependencies between system layers & RQ3; gap in Section 4.2 (dependency models lack runtime coupling to recovery) & Configurable DependsOn relationships stored as a directed dependency graph \\
+FR1 & Detect failure states in individual system layers & RQ1; gap in Section~\ref{sec:lit-fault-models} (taxonomies lack runtime detection semantics) & Telemetry-driven rule evaluation; episode tracking per telemetry source \\
+FR2 & Model interdependencies between system layers & RQ3; gap in Section~\ref{sec:lit-dependency-modelling} (dependency models lack runtime coupling to recovery) & Configurable DependsOn relationships stored as a directed dependency graph \\
 FR3 & Determine the root cause when multiple failures occur & RQ3; evidence from \cite{ref7,ref8,ref9} that propagation determines system-level impact & Dependency traversal selects the deepest active upstream fault; cycle-safe termination \\
-FR4 & Resolve failures at the correct layer & RQ4; gap in Section 4.4 (no episode-gated, dependency-coordinated recovery) & Execute resolution only for root cause; deduplicate per episode; suppress only metrics listed in Impacts \\
+FR4 & Resolve failures at the correct layer & RQ4; gap in Section~\ref{sec:lit-fdir-recovery} (no episode-gated, dependency-coordinated recovery) & Execute resolution only for root cause; deduplicate per episode; suppress only metrics listed in Impacts \\
 FR5 & Verify the outcome of a resolution attempt & RQ4; evidence from \cite{ref2} that recovery must include escalation for unresolved faults & After resolution, if violation persists on subsequent samples, create a persistent fault record \\
 FR6 & Expose unresolved and persistent failures to operators & RQ4; evidence from \cite{ref5} that fault management must integrate localisation with recovery & Persistent faults exposed via \gls{netconf} operational state \\
-FR7 & Support different modular router configurations & RQ5; platform constraint from Section 2.7 & Behaviour changes via runtime configuration (\gls{yang}/\gls{netconf}); no hardcoded service assumptions \\
+FR7 & Support different modular router configurations & RQ5; platform constraint from Section~\ref{sec:router-constraints} & Behaviour changes via runtime configuration (\gls{yang}/\gls{netconf}); no hardcoded service assumptions \\
 FR8 & Validate configuration and handle invalid rules & NFR9; implementation constraint & Validate dependency references at configuration time; disable rules with unresolvable dependencies \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\subsection{Non-Functional Requirements}
+\subsection{Non-Functional Requirements}\label{sec:non-functional-requirements}
 
-The non-functional requirements define the quality attributes that the framework must satisfy to be suitable for deployment on industrial router platforms. These are derived from the constraints identified in Section 2.7 and from the limitations of existing approaches identified in Chapter 4.
+The non-functional requirements define the quality attributes that the framework must satisfy to be suitable for deployment on industrial router platforms. These are derived from the constraints identified in Section~\ref{sec:router-constraints} and from the limitations of existing approaches identified in Chapter~\ref{chap:literature-review-results}.
 
 \begin{table}[htbp]
 \centering
@@ -102,9 +102,9 @@ The non-functional requirements define the quality attributes that the framework
 ID & Requirement & Rationale & Evaluation Metric \\
 \midrule
 NFR1 & Minimal impact on non-faulty components & Cascading recovery identified as a limitation in \cite{ref17,ref20}; failure amplification demonstrated in \cite{ref16} & Resolutions on non-root-cause layers per episode = 0; only declared impacts suppressed \\
-NFR2 & Deterministic behaviour & Required for industrial certification (Section 2.7); \gls{ml}-based methods excluded per Section 4.5 & Replaying the same telemetry stream produces identical fault, root cause, and resolution results \\
+NFR2 & Deterministic behaviour & Required for industrial certification (Section~\ref{sec:router-constraints}); \gls{ml}-based methods excluded per Section~\ref{sec:lit-ml-vs-deterministic} & Replaying the same telemetry stream produces identical fault, root cause, and resolution results \\
 NFR3 & Stability under persistent faults & Repeated recovery identified as a gap in \cite{ref20}; episode gating absent in \cite{ref17,ref19} & Resolutions per episode bounded (at most one per root cause per episode) \\
-NFR4 & Bounded resource usage & Embedded platform constraint (Section 2.7); telemetry overhead concern from \cite{ref14,ref17} & Memory consumption remains bounded and does not grow with operational duration \\
+NFR4 & Bounded resource usage & Embedded platform constraint (Section~\ref{sec:router-constraints}); telemetry overhead concern from \cite{ref14,ref17} & Memory consumption remains bounded and does not grow with operational duration \\
 NFR5 & Timely fault handling & Timing analysis from \cite{ref23,ref25} demonstrates feasibility of bounded detection-to-recovery latency & Detection-to-resolution latency within defined targets \\
 NFR6 & Observability & Persistent fault exposure required for escalation; cross-layer visibility motivated by \cite{ref13,ref15} & Persistent faults visible via \gls{netconf}; key events logged \\
 NFR7 & Scalability across service layers & Cross-layer fault correlation required per \cite{ref12,ref13}; router services span multiple layers & Framework remains functional with at least 10 telemetry layers and 50 rules \\
@@ -116,7 +116,7 @@ NFR11 & Thread-safe concurrent operation & Multiple telemetry sources publish as
 \end{tabular}
 \end{table}
 
-\subsection{Requirements Mapping}
+\subsection{Requirements Mapping}\label{sec:requirements-mapping}
 
 Each functional requirement is supported by a subset of non-functional requirements that constrain how the functional requirement is realised:
 
@@ -142,7 +142,7 @@ FR8 Validate configuration & NFR3, NFR9, NFR11 \\
 
 This mapping ensures that non-functional concerns are not treated as afterthoughts but are integral to the design of each functional capability.
 
-\subsection{Design Principles}
+\subsection{Design Principles}\label{sec:design-principles}
 
 From the requirements and the limitations identified in the literature, five overarching design principles emerge that guide the architectural and algorithmic decisions in Sections 5.3 through 5.8:
 
@@ -152,7 +152,7 @@ The framework does not perform periodic polling or background computation. All p
 
 \textbf{Principle 2: Deterministic Evaluation (NFR2, NFR3).}
 
-Identical inputs always produce identical outputs. Rule evaluation uses fixed thresholds and comparison operators without statistical models, adaptive algorithms, or \gls{ml}-based inference. Dependency traversal follows a deterministic order. Resolution executes at most once per episode. This ensures reproducibility, auditability, and predictable behaviour across deployments. The exclusion of \gls{ml}-based methods is justified by the analysis in Section 4.5, where \cite{ref6,ref22,ref27,ref28} demonstrate that \gls{ml}-based diagnosis requires computational overhead and training data volumes incompatible with embedded industrial platforms. The adoption of rule-based logic follows the principle established by Goel and Gupta (Goel-SOTRBES), who demonstrate that forward-chaining production rules can map outage conditions to fault-tolerance strategies with deterministic, explainable decision paths.
+Identical inputs always produce identical outputs. Rule evaluation uses fixed thresholds and comparison operators without statistical models, adaptive algorithms, or \gls{ml}-based inference. Dependency traversal follows a deterministic order. Resolution executes at most once per episode. This ensures reproducibility, auditability, and predictable behaviour across deployments. The exclusion of \gls{ml}-based methods is justified by the analysis in Section~\ref{sec:lit-ml-vs-deterministic}, where \cite{ref6,ref22,ref27,ref28} demonstrate that \gls{ml}-based diagnosis requires computational overhead and training data volumes incompatible with embedded industrial platforms. The adoption of rule-based logic follows the principle established by Goel and Gupta (Goel-SOTRBES), who demonstrate that forward-chaining production rules can map outage conditions to fault-tolerance strategies with deterministic, explainable decision paths.
 
 \textbf{Principle 3: Declarative Configuration (NFR7, NFR8).}
 
@@ -160,19 +160,19 @@ All framework behaviour telemetry sources, detection rules, dependency relations
 
 \textbf{Principle 4: Root-Cause-Only Resolution (NFR1, NFR3, NFR9).}
 
-The framework resolves faults at their root cause, not at symptomatic downstream services. Downstream impacts are suppressed rather than independently resolved. This prevents the cascading recovery actions identified as a limitation in existing frameworks (Section 4.7). The justification draws on three bodies of evidence: Popic et al. \cite{ref7} demonstrate that components with high error leakage dominate system failure, implying that resolution should target propagation sources; Bhandari and Ratneshwer \cite{ref10} show that dependency-aware diagnosis can identify impact regions where a single fault corrupts downstream services; and Dymora et al. \cite{ref16} demonstrate that recovery mechanisms in constrained networks can themselves become failure amplifiers, motivating bounded and targeted recovery execution.
+The framework resolves faults at their root cause, not at symptomatic downstream services. Downstream impacts are suppressed rather than independently resolved. This prevents the cascading recovery actions identified as a limitation in existing frameworks (Section~\ref{sec:lit-summary}). The justification draws on three bodies of evidence: Popic et al. \cite{ref7} demonstrate that components with high error leakage dominate system failure, implying that resolution should target propagation sources; Bhandari and Ratneshwer \cite{ref10} show that dependency-aware diagnosis can identify impact regions where a single fault corrupts downstream services; and Dymora et al. \cite{ref16} demonstrate that recovery mechanisms in constrained networks can themselves become failure amplifiers, motivating bounded and targeted recovery execution.
 
 \textbf{Principle 5: Bounded Resource Usage (NFR4, NFR7).}
 
-All data structures are bounded: the event queue the same bounded FIFO queue into which incoming telemetry samples and configuration events are enqueued as described in Principle 1 has a fixed maximum size, suppression counters are finite, and episode tracking does not accumulate unbounded state. When the event queue reaches its capacity, the oldest event is dropped to make room for new arrivals (drop-oldest policy). This ensures that the framework always processes the most recent data and prevents unbounded memory growth. However, dropping events has correctness implications: a dropped sample could be the one that would have cleared a fault condition, causing the framework to miss an episode-end transition until the next non-dropped sample arrives. The queue capacity must therefore be dimensioned relative to the expected telemetry ingestion rate and the framework's processing throughput to minimise the probability of overflow under normal operating conditions. The framework is designed to operate indefinitely on resource-constrained embedded platforms without memory growth or performance degradation. This principle is motivated by the constraints identified in Section 2.7 and by the observation in \cite{ref17} that self-healing architectures relying on distributed log platforms and resource-intensive orchestration are misaligned with embedded systems.
+All data structures are bounded: the event queue the same bounded FIFO queue into which incoming telemetry samples and configuration events are enqueued as described in Principle 1 has a fixed maximum size, suppression counters are finite, and episode tracking does not accumulate unbounded state. When the event queue reaches its capacity, the oldest event is dropped to make room for new arrivals (drop-oldest policy). This ensures that the framework always processes the most recent data and prevents unbounded memory growth. However, dropping events has correctness implications: a dropped sample could be the one that would have cleared a fault condition, causing the framework to miss an episode-end transition until the next non-dropped sample arrives. The queue capacity must therefore be dimensioned relative to the expected telemetry ingestion rate and the framework's processing throughput to minimise the probability of overflow under normal operating conditions. The framework is designed to operate indefinitely on resource-constrained embedded platforms without memory growth or performance degradation. This principle is motivated by the constraints identified in Section~\ref{sec:router-constraints} and by the observation in \cite{ref17} that self-healing architectures relying on distributed log platforms and resource-intensive orchestration are misaligned with embedded systems.
 
 These principles are referenced throughout the subsequent sections to justify specific design decisions.
 
-\section{Telemetry Ingestion and Structured Data Model (RQ2)}
+\section{Telemetry Ingestion and Structured Data Model (RQ2)}\label{sec:telemetry-model}
 
-Research question RQ2 asks how telemetry in industrial routers can be organised into a coherent model that enables stateful fault tracking across time and supports root cause localisation under bounded resource constraints. The literature review identified that existing telemetry frameworks focus on data collection and correlation but do not encode fault episode state under bounded resource constraints (Section 4.3). Iurman et al.\ \cite{ref13} demonstrate that cross-layer telemetry correlation accelerates fault localisation, Xu et al.\ \cite{ref14} show that telemetry must be prioritised under bandwidth constraints, and Melo and Aquino \cite{ref15} establish that structured fault-event formats reduce detection latency. This section defines the telemetry data model, the ingestion path through which telemetry enters the framework culminating in the bounded event queue introduced in Principle 5 (Section 5.2.4) and the validation mechanisms that ensure only well-formed data enters the subsequent \gls{fdir} processing stages (rule evaluation, episode management, root cause analysis, and resolution, defined in Sections 5.4 through 5.8).
+Research question RQ2 asks how telemetry in industrial routers can be organised into a coherent model that enables stateful fault tracking across time and supports root cause localisation under bounded resource constraints. The literature review identified that existing telemetry frameworks focus on data collection and correlation but do not encode fault episode state under bounded resource constraints (Section~\ref{sec:lit-telemetry}). Iurman et al.\ \cite{ref13} demonstrate that cross-layer telemetry correlation accelerates fault localisation, Xu et al.\ \cite{ref14} show that telemetry must be prioritised under bandwidth constraints, and Melo and Aquino \cite{ref15} establish that structured fault-event formats reduce detection latency. This section defines the telemetry data model, the ingestion path through which telemetry enters the framework culminating in the bounded event queue introduced in Principle 5 (Section 5.2.4) and the validation mechanisms that ensure only well-formed data enters the subsequent \gls{fdir} processing stages (rule evaluation, episode management, root cause analysis, and resolution, defined in Sections 5.4 through 5.8).
 
-\subsection{Telemetry Data Model}
+\subsection{Telemetry Data Model}\label{sec:telemetry-data-model}
 
 The framework operates on three types of data, each defined declaratively through the \gls{yang} model:
 
@@ -203,7 +203,7 @@ A rule definition specifies a condition under which a telemetry metric is consid
 \item Resolution script path: The filesystem path to an executable script that should be invoked to resolve the fault.
 \end{itemize}
 
-Dependencies and impacts together define the service dependency graph (Section 5.5). By embedding dependency and impact declarations directly in rule definitions, the framework ensures that the dependency model is always consistent with the detection configuration. This co-location of detection rules and dependency declarations is an original design decision of this thesis, not derived from existing literature: it prevents the inconsistency that would arise if dependency graphs and detection rules were maintained in separate configuration stores. The reviewed literature either maintains dependency models independently of detection rules (e.g., the CPN-based approach in \cite{ref10}, the Bayesian network in \cite{ref12}) or does not address the consistency problem between detection and dependency configurations.
+Dependencies and impacts together define the service dependency graph (Section~\ref{sec:dependency-model}). By embedding dependency and impact declarations directly in rule definitions, the framework ensures that the dependency model is always consistent with the detection configuration. This co-location of detection rules and dependency declarations is an original design decision of this thesis, not derived from existing literature: it prevents the inconsistency that would arise if dependency graphs and detection rules were maintained in separate configuration stores. The reviewed literature either maintains dependency models independently of detection rules (e.g., the CPN-based approach in \cite{ref10}, the Bayesian network in \cite{ref12}) or does not address the consistency problem between detection and dependency configurations.
 
 \textbf{Telemetry Samples.}
 
@@ -217,7 +217,7 @@ A telemetry sample represents a single measurement at a point in time. Each samp
 
 Samples are the primary input that drives the \gls{fdir} processing pipeline. Each incoming sample triggers rule evaluation, state tracking, and potentially root cause analysis and resolution.
 
-\subsection{Ingestion Pipeline and Validation}
+\subsection{Ingestion Pipeline and Validation}\label{sec:ingestion-validation}
 
 Telemetry data enters the framework through two channels:
 
@@ -237,9 +237,9 @@ All incoming data passes through a validation layer before entering the processi
 \item Dependency references in rule definitions are validated at configuration time. Rules referencing undefined dependencies are disabled until all dependencies are resolvable (FR8).
 \end{itemize}
 
-Valid data is enqueued into a bounded event queue (Section 5.8) for ordered processing. Invalid data is rejected at the ingestion boundary with appropriate logging.
+Valid data is enqueued into a bounded event queue (Section~\ref{sec:integrated-architecture}) for ordered processing. Invalid data is rejected at the ingestion boundary with appropriate logging.
 
-\subsection{Bounded Resource Design}
+\subsection{Bounded Resource Design}\label{sec:bounded-resource-design}
 
 The telemetry model is designed to operate within the resource constraints of industrial routers, responding to the limitations identified in \cite{ref14,ref17}:
 
@@ -251,19 +251,19 @@ The telemetry model is designed to operate within the resource constraints of in
 
 \textbf{Limitation:} The current telemetry model processes each metric independently. Cross-metric correlation (e.g., detecting that \gls{cpu} utilisation and packet loss are simultaneously elevated) is not supported within the rule evaluation mechanism. Correlation is expressed only through the dependency graph, which captures structural relationships between telemetry sources but not statistical co-occurrence patterns. This is a deliberate trade-off: cross-metric correlation would require either \gls{ml}-based methods (excluded per Principle 2) or combinatorial rule definitions that grow with the number of metric pairs.
 
-\section{Rule-Based Fault Detection (RQ1)}
+\section{Rule-Based Fault Detection (RQ1)}\label{sec:rule-based-detection}
 
-Research question RQ1 asks how faults in \gls{soa}-based industrial routers can be systematically characterised to support precise detection, isolation, and recovery under embedded system constraints. The literature review identified that existing fault taxonomies provide expressive classification schemes including recovery-oriented attributes such as severity, granularity, and recoverability \cite{ref1,ref2} but do not support runtime differentiation between initial fault occurrence and repeated observations (Section 4.1). This section defines the rule-based detection mechanism that evaluates telemetry samples against declared thresholds and produces fault events that drive the episode lifecycle.
+Research question RQ1 asks how faults in \gls{soa}-based industrial routers can be systematically characterised to support precise detection, isolation, and recovery under embedded system constraints. The literature review identified that existing fault taxonomies provide expressive classification schemes including recovery-oriented attributes such as severity, granularity, and recoverability \cite{ref1,ref2} but do not support runtime differentiation between initial fault occurrence and repeated observations (Section~\ref{sec:lit-fault-models}). This section defines the rule-based detection mechanism that evaluates telemetry samples against declared thresholds and produces fault events that drive the episode lifecycle.
 
-\subsection{Rule Evaluation}
+\subsection{Rule Evaluation}\label{sec:rule-evaluation}
 
 When a telemetry sample arrives and is matched to its telemetry definition, the framework evaluates all rules associated with that (source, metric) pair. For each rule, the sample value is compared against the threshold using the declared operator. If the comparison evaluates to true, the rule is considered violated.
 
-The evaluation is purely deterministic: identical inputs always produce identical outputs (Principle 2). No statistical models, moving averages, or adaptive thresholds are used. This ensures that fault detection behaviour is transparent, reproducible, and suitable for certification and audit requirements in industrial environments. The choice of deterministic threshold-based detection over \gls{ml}-based anomaly detection is justified by the analysis in Section 4.5: Singh and Kumar \cite{ref6} identify that \gls{soa} fault prediction is constrained by noisy datasets and limited observability, and Jabbarpour et al.\ \cite{ref22} demonstrate that \gls{ml}-centric predictive diagnostics require computational overhead incompatible with embedded platforms.
+The evaluation is purely deterministic: identical inputs always produce identical outputs (Principle 2). No statistical models, moving averages, or adaptive thresholds are used. This ensures that fault detection behaviour is transparent, reproducible, and suitable for certification and audit requirements in industrial environments. The choice of deterministic threshold-based detection over \gls{ml}-based anomaly detection is justified by the analysis in Section~\ref{sec:lit-ml-vs-deterministic}: Singh and Kumar \cite{ref6} identify that \gls{soa} fault prediction is constrained by noisy datasets and limited observability, and Jabbarpour et al.\ \cite{ref22} demonstrate that \gls{ml}-centric predictive diagnostics require computational overhead incompatible with embedded platforms.
 
 \textbf{Limitation:} The current rule evaluation supports only single-threshold comparisons on individual metrics. Multi-condition rules (e.g., "CPU > 90\% AND memory > 85\%") and temporal rules (e.g., "metric exceeds threshold for more than N consecutive samples") are not supported. Each rule evaluates a single metric against a single threshold. This restricts the expressiveness of fault characterisation compared to the multi-dimensional classification proposed in \cite{ref1}, where severity, granularity, and priority jointly determine recovery actions. In the current design, these dimensions are implicitly encoded through the combination of multiple single-threshold rules and the dependency graph, rather than through explicit multi-attribute classification.
 
-\subsection{Rule State Tracking and Transition Detection}
+\subsection{Rule State Tracking and Transition Detection}\label{sec:rule-state-tracking}
 
 The framework maintains a violation state for each rule. The rule state tracker records whether each rule is currently violated or healthy and detects state transitions:
 
@@ -274,9 +274,9 @@ The framework maintains a violation state for each rule. The rule state tracker 
 \item Healthy $\rightarrow$ Healthy: No change. No action is taken.
 \end{itemize}
 
-Only the healthy-to-violated transition triggers downstream processing (episode creation, root cause analysis, resolution). This rising-edge detection is the primary mechanism that distinguishes new fault occurrences from ongoing violations, directly addressing the gap identified in Section 4.1 where existing taxonomies \cite{ref1,ref3,ref5} do not define how repeated observations over time should be grouped into a single operational incident.
+Only the healthy-to-violated transition triggers downstream processing (episode creation, root cause analysis, resolution). This rising-edge detection is the primary mechanism that distinguishes new fault occurrences from ongoing violations, directly addressing the gap identified in Section~\ref{sec:lit-fault-models} where existing taxonomies \cite{ref1,ref3,ref5} do not define how repeated observations over time should be grouped into a single operational incident.
 
-\subsection{Fault Record Creation}
+\subsection{Fault Record Creation}\label{sec:fault-record-creation}
 
 When a rule transitions from healthy $\rightarrow$ violated, the fault detector creates a fault record containing:
 
@@ -284,25 +284,25 @@ When a rule transitions from healthy $\rightarrow$ violated, the fault detector 
 \item The telemetry ID and rule ID that produced the fault.
 \item The severity of the fault.
 \item The timestamp at which the fault was detected.
-\item The root cause telemetry ID (initially set to the faulted telemetry itself; updated by dependency analysis in Section 5.5.3).
+\item The root cause telemetry ID (initially set to the faulted telemetry itself; updated by dependency analysis in Section~\ref{sec:root-cause-analysis}).
 \item A suppression flag indicating whether the telemetry is currently suppressed due to a recent resolution of an upstream dependency.
 \end{itemize}
 
-If the telemetry is currently suppressed (Section 5.7), the fault record is created with the suppression flag set to true. Suppressed faults are recorded for observability (NFR6) but do not trigger resolution actions, preventing redundant recovery during the post-resolution observation window.
+If the telemetry is currently suppressed (Section~\ref{sec:resolution-suppression}), the fault record is created with the suppression flag set to true. Suppressed faults are recorded for observability (NFR6) but do not trigger resolution actions, preventing redundant recovery during the post-resolution observation window.
 
 \textbf{Limitation:} In the current design, all detected faults are assigned a uniform severity level. The severity defines multiple levels (Healthy, Warning, Critical, NonCritical, Degraded, Failed), but the detection mechanism does not differentiate between them based on threshold proximity, violation duration, or other criteria. This means that the graduated severity model proposed in \cite{ref1} where severity directly governs recovery action selection is not realised. Severity-based recovery differentiation remains an open extension point.
 
-\subsection{Suppression-Aware Detection}
+\subsection{Suppression-Aware Detection}\label{sec:suppression-aware-detection}
 
 The framework checks the suppression state of each telemetry before processing newly violated rules. If a telemetry is suppressed, newly detected faults are marked as suppressed and do not enter the resolution pipeline. This mechanism prevents the framework from attempting to resolve faults that are expected to clear as a consequence of an upstream resolution that has already been executed.
 
-Each suppressed telemetry is assigned a suppression counter an integer initialised to a fixed number of samples (default: 60) when suppression begins (Section 5.7.3). This counter is decremented by one on every incoming sample for the suppressed telemetry, regardless of whether the sample triggers a violation. When the counter reaches zero, suppression is lifted: subsequent violations for that telemetry are treated as new, independent faults and enter the normal detection analysis resolution pipeline. This ensures that suppression windows are tied to actual data arrival rather than wall-clock time, which is appropriate for embedded systems where sample rates may vary and where the arrival of new data is the natural indicator that the system has had an opportunity to recover.
+Each suppressed telemetry is assigned a suppression counter an integer initialised to a fixed number of samples (default: 60) when suppression begins (Section~\ref{sec:sample-count-suppression}). This counter is decremented by one on every incoming sample for the suppressed telemetry, regardless of whether the sample triggers a violation. When the counter reaches zero, suppression is lifted: subsequent violations for that telemetry are treated as new, independent faults and enter the normal detection analysis resolution pipeline. This ensures that suppression windows are tied to actual data arrival rather than wall-clock time, which is appropriate for embedded systems where sample rates may vary and where the arrival of new data is the natural indicator that the system has had an opportunity to recover.
 
-\section{Service Dependency Model (RQ3)}
+\section{Service Dependency Model (RQ3)}\label{sec:dependency-model}
 
-Research question RQ3 asks how service dependencies in industrial routers should be represented to enable deterministic reasoning about failure propagation and to identify causal relationships between service malfunctions. The literature review established that explicit dependency modelling is necessary for accurate fault management: Popic et al.\ \cite{ref7} demonstrate that ignoring inter-component error propagation substantially overestimates system reliability, Hiller et al.\ \cite{ref8} show that error exposure not raw detection efficiency determines the practical value of safeguards, and Chiang et al.\ \cite{ref9} prove that error propagation non-linearly degrades system reliability in chained services. However, the available models are either design-time analytical tools (the CPN approach in \cite{ref10} relies on exhaustive reachability graphs; the Bayesian network in \cite{ref12} requires maintaining conditional probability tables) or runtime systems that exceed the computational envelope of router-class devices (Section 4.2). This section defines the dependency model used by the framework for runtime root cause identification and impact-aware suppression.
+Research question RQ3 asks how service dependencies in industrial routers should be represented to enable deterministic reasoning about failure propagation and to identify causal relationships between service malfunctions. The literature review established that explicit dependency modelling is necessary for accurate fault management: Popic et al.\ \cite{ref7} demonstrate that ignoring inter-component error propagation substantially overestimates system reliability, Hiller et al.\ \cite{ref8} show that error exposure not raw detection efficiency determines the practical value of safeguards, and Chiang et al.\ \cite{ref9} prove that error propagation non-linearly degrades system reliability in chained services. However, the available models are either design-time analytical tools (the CPN approach in \cite{ref10} relies on exhaustive reachability graphs; the Bayesian network in \cite{ref12} requires maintaining conditional probability tables) or runtime systems that exceed the computational envelope of router-class devices (Section~\ref{sec:lit-dependency-modelling}). This section defines the dependency model used by the framework for runtime root cause identification and impact-aware suppression.
 
-\subsection{Dependency Graph Structure}
+\subsection{Dependency Graph Structure}\label{sec:dependency-graph-structure}
 
 The dependency model represents relationships between monitored telemetry sources as a directed graph $G = (V, E)$, where:
 
@@ -328,9 +328,9 @@ Design decision: Dependencies are declared statically in rule definitions rather
 
 Limitation: The dependency model does not distinguish between different types of dependencies (e.g., data dependencies, control dependencies, resource dependencies) as proposed in \cite{ref10}. All dependencies are treated uniformly as directed edges. This means that the framework cannot reason about whether a dependency is mandatory or optional, or whether a fault in a dependency always propagates or only propagates under certain conditions. The dependency graph captures structural relationships but not propagation probabilities or conditional propagation semantics.
 
-\subsection{Dependency-Ordered Sample Processing}
+\subsection{Dependency-Ordered Sample Processing}\label{sec:dependency-ordered-processing}
 
-Design decision: Telemetry samples are not processed in arrival order but in dependency order. When multiple samples arrive in a processing batch, the framework performs a topological sort of the affected telemetry IDs based on the dependency graph before evaluating rules. The sort operates on a local snapshot of already-dequeued events; new samples continue to be received and enqueued concurrently via the bounded event queue (Section 5.8.1) and are processed in the next cycle.
+Design decision: Telemetry samples are not processed in arrival order but in dependency order. When multiple samples arrive in a processing batch, the framework performs a topological sort of the affected telemetry IDs based on the dependency graph before evaluating rules. The sort operates on a local snapshot of already-dequeued events; new samples continue to be received and enqueued concurrently via the bounded event queue (Section~\ref{sec:architectural-components}) and are processed in the next cycle.
 
 This ensures that upstream telemetry is evaluated before downstream telemetry within the same processing cycle. The consequence is that when a root cause fault and its downstream symptoms arrive simultaneously, the root cause is detected first, enabling accurate dependency classification of the downstream faults. This ordering principle is motivated by the propagation direction insight from Liu et al.\ \cite{ref27}, who demonstrate that direction-aware traversal (processing upstream before downstream for error-count anomalies) bounds the search space during fault localisation.
 
@@ -338,7 +338,7 @@ The topological sort uses a depth-first traversal with cycle detection. If a cyc
 
 Limitation: The cycle-handling strategy breaks cycles during traversal rather than rejecting them as configuration errors at configuration time. When a cycle is detected, the back-edge node is skipped and the cycle is logged as a warning to ensure operator visibility (NFR6). However, the processing order within a cycle depends on which node is visited first during the \gls{dfs} traversal, which is determined by the iteration order of the internal data structure. While the result is deterministic for a given configuration, it is not explicitly controllable by the operator. To ensure fully deterministic cycle- breaking independent of internal data structure ordering, adjacency lists should be sorted by telemetry ID before traversal. The prototype does not implement this sorting. A future extension could additionally validate the dependency graph for acyclicity at configuration time and reject cyclic declarations.
 
-\subsection{Root Cause Analysis}
+\subsection{Root Cause Analysis}\label{sec:root-cause-analysis}
 
 When a new fault is detected (a rule transitions from healthy to violated and the telemetry is not suppressed), the framework performs root cause analysis by traversing the dependency graph upstream:
 
@@ -359,7 +359,7 @@ The root cause telemetry ID is recorded in the fault record, enabling the resolu
   \label{fig:root-cause-analysis}
 \end{figure}
 
-\subsection{Transitive Impact Propagation}
+\subsection{Transitive Impact Propagation}\label{sec:transitive-impact}
 
 When a resolution is executed for a root cause fault, the framework determines the full set of downstream telemetries that may be affected. This is computed by traversing the reverse dependency graph starting from the root cause telemetry ID using breadth-first search:
 
@@ -370,13 +370,13 @@ When a resolution is executed for a root cause fault, the framework determines t
 \item The root cause itself is excluded from the impact set.
 \end{enumerate}
 
-All telemetries in the transitive impact set are suppressed (Section 5.7), preventing the framework from attempting to resolve faults that are expected to clear as a consequence of the root cause resolution. The use of the full transitive closure rather than only direct impacts ensures that multi-hop propagation chains are correctly handled, consistent with the finding in \cite{ref9} that error propagation across chained services non-linearly degrades reliability.
+All telemetries in the transitive impact set are suppressed (Section~\ref{sec:resolution-suppression}), preventing the framework from attempting to resolve faults that are expected to clear as a consequence of the root cause resolution. The use of the full transitive closure rather than only direct impacts ensures that multi-hop propagation chains are correctly handled, consistent with the finding in \cite{ref9} that error propagation across chained services non-linearly degrades reliability.
 
-\section{Fault Episode Model and Lifecycle (RQ1--RQ4)}
+\section{Fault Episode Model and Lifecycle (RQ1--RQ4)}\label{sec:episode-model}
 
-Research questions RQ1 through RQ4 collectively require a runtime mechanism that groups related fault observations into coherent episodes, tracks their progression over time, and governs when recovery actions may execute. The literature review identified that existing frameworks do not treat fault episodes as first-class runtime entities: self-healing frameworks \cite{ref17,ref19,ref21} provide recovery patterns but do not enforce at-most-once recovery semantics; reactive \gls{fdir} approaches \cite{ref20} operate with coarse-state tracking; and embedded failover mechanisms \cite{ref23,ref24,ref25} focus on task-level migration rather than service-dependency-aware episode management (Section 4.4). This section defines the fault episode model, which constitutes the central conceptual contribution of this framework.
+Research questions RQ1 through RQ4 collectively require a runtime mechanism that groups related fault observations into coherent episodes, tracks their progression over time, and governs when recovery actions may execute. The literature review identified that existing frameworks do not treat fault episodes as first-class runtime entities: self-healing frameworks \cite{ref17,ref19,ref21} provide recovery patterns but do not enforce at-most-once recovery semantics; reactive \gls{fdir} approaches \cite{ref20} operate with coarse-state tracking; and embedded failover mechanisms \cite{ref23,ref24,ref25} focus on task-level migration rather than service-dependency-aware episode management (Section~\ref{sec:lit-fdir-recovery}). This section defines the fault episode model, which constitutes the central conceptual contribution of this framework.
 
-\subsection{Definition of a Fault Episode}
+\subsection{Definition of a Fault Episode}\label{sec:episode-definition}
 
 As defined in the Definitions section, a fault episode denotes a continuous time interval during which a fault condition persists. This section specifies the operational mechanics of the episode concept within the framework. A fault episode is a runtime entity that represents a continuous interval during which at least one rule associated with a specific telemetry source is in a violated state. An episode begins when the first rule for a telemetry transitions from healthy to violated, and ends when all rules for that telemetry have returned to a healthy state. The episode is the unit of fault management: resolution actions are executed at most once per episode, and episode boundaries determine when the framework considers a fault to be new versus ongoing.
 
@@ -384,7 +384,7 @@ Each telemetry ID maintains its own independent episode counter. When a new epis
 
 This definition directly addresses the gap identified across \cite{ref1,ref3,ref5,ref17,ref19,ref20,ref26}: none of these works define how repeated observations over time should be grouped into a single operational incident that governs recovery execution. The fault episode provides this grouping mechanism.
 
-\subsection{Episode Lifecycle}
+\subsection{Episode Lifecycle}\label{sec:episode-lifecycle}
 
 The episode lifecycle is governed by the active rule count for each telemetry ID:
 
@@ -394,7 +394,7 @@ The episode lifecycle is governed by the active rule count for each telemetry ID
 
 \textbf{Episode End.} When the active rule count for a telemetry ID transitions from a positive value to zero (all rules have returned to healthy), the episode ends. The telemetry is marked as inactive. Any subsequent violation will start a new episode with a new episode ID.
 
-This state lifecycle (inactive $\rightarrow$ active $\rightarrow$ inactive) is deliberately constrained compared to multi-state models found in some self-healing frameworks such as \cite{ref19}, which uses HMM-based state estimation, or \cite{ref21}, which decomposes self-healing into monitor--diagnose--plan--enact phases with feedback calibration. The constraint is a design choice driven by the determinism and resource requirements of industrial routers (Principle 2, Principle 5): fewer states mean fewer transitions to validate, fewer edge cases to handle, and more predictable behaviour under all conditions. Whether this reduced state space is sufficient for all industrial router fault scenarios is an empirical question addressed in the evaluation (Chapter 7). Figure extends this two-state episode lifecycle with two additional states Resolved and Persistent that represent the outcome of resolution execution (Section 5.6.3) and the detection of faults that persist after resolution (Section 5.6.4). The episode lifecycle itself remains governed by two states (Inactive and Active); Resolved and Persistent are resolution-outcome states that refine the Active state rather than introducing additional episode transitions.
+This state lifecycle (inactive $\rightarrow$ active $\rightarrow$ inactive) is deliberately constrained compared to multi-state models found in some self-healing frameworks such as \cite{ref19}, which uses HMM-based state estimation, or \cite{ref21}, which decomposes self-healing into monitor--diagnose--plan--enact phases with feedback calibration. The constraint is a design choice driven by the determinism and resource requirements of industrial routers (Principle 2, Principle 5): fewer states mean fewer transitions to validate, fewer edge cases to handle, and more predictable behaviour under all conditions. Whether this reduced state space is sufficient for all industrial router fault scenarios is an empirical question addressed in the evaluation (Chapter~\ref{chap:evaluation}). Figure extends this two-state episode lifecycle with two additional states Resolved and Persistent that represent the outcome of resolution execution (Section~\ref{sec:at-most-once}) and the detection of faults that persist after resolution (Section~\ref{sec:persistent-fault-detection}). The episode lifecycle itself remains governed by two states (Inactive and Active); Resolved and Persistent are resolution-outcome states that refine the Active state rather than introducing additional episode transitions.
 
 \begin{figure}[htbp]
   \centering
@@ -403,9 +403,9 @@ This state lifecycle (inactive $\rightarrow$ active $\rightarrow$ inactive) is d
   \label{fig:fault-episode-lifecycle-state-machine}
 \end{figure}
 
-The Persistent state is not a loop: the at-most-once resolution guarantee (Section 5.6.3) prevents re-execution of the resolution script within the same episode. Once a fault is classified as persistent, the framework records it and exposes it through the YANG operational state model as read-only data, signalling to external management systems that automated resolution was insufficient and manual intervention is required. The episode remains in the Persistent state until all associated rules return to a healthy state, at which point the episode ends and the telemetry transitions to Inactive. If the same fault recurs after the episode has ended, a new episode begins and resolution is permitted again.
+The Persistent state is not a loop: the at-most-once resolution guarantee (Section~\ref{sec:at-most-once}) prevents re-execution of the resolution script within the same episode. Once a fault is classified as persistent, the framework records it and exposes it through the \gls{yang} operational state model as read-only data, signalling to external management systems that automated resolution was insufficient and manual intervention is required. The episode remains in the Persistent state until all associated rules return to a healthy state, at which point the episode ends and the telemetry transitions to Inactive. If the same fault recurs after the episode has ended, a new episode begins and resolution is permitted again.
 
-\subsection{At-Most-Once Resolution Guarantee}
+\subsection{At-Most-Once Resolution Guarantee}\label{sec:at-most-once}
 
 The episode model enforces that at most one resolution action is executed per root cause per episode. This guarantee is implemented through a resolved-episodes set that records $(telemetryId, episodeId)$ pairs for which resolution has already been executed.
 
@@ -419,13 +419,13 @@ This mechanism ensures that:
 \item Multiple rules violating for the same telemetry within the same episode trigger at most one resolution for the root cause.
 \end{itemize}
 
-The at-most-once guarantee is the operational realisation of the episode concept: it transforms the abstract notion of ``fault episode'' into a concrete runtime constraint that governs recovery execution. This is the mechanism that existing frameworks lack, as identified in the consolidated gap (Section 4.7).
+The at-most-once guarantee is the operational realisation of the episode concept: it transforms the abstract notion of ``fault episode'' into a concrete runtime constraint that governs recovery execution. This is the mechanism that existing frameworks lack, as identified in the consolidated gap (Section~\ref{sec:lit-summary}).
 
 Because episode IDs are monotonically increasing and never reused, entries in the resolved-episodes set for ended episodes (where the active rule count has returned to zero) can be safely removed without affecting the at-most-once guarantee: a future episode for the same telemetry will have a strictly higher episode ID and will therefore never match a removed entry. The conceptual design therefore supports bounded memory usage for the resolved-episodes set through pruning upon episode end.
 
-\subsection{Persistent Fault Detection}
+\subsection{Persistent Fault Detection}\label{sec:persistent-fault-detection}
 
-A fault is classified as persistent if it remains in a violated state on the next telemetry sample received after a resolution has been executed for it. There is no configurable grace period: the check occurs on the first post-resolution sample for the affected telemetry. This detection timing is not configurable through the YANG model in the current design. A configurable post-resolution observation window specifying how many samples must remain violated before escalation would reduce false persistent-fault classifications in cases where the resolution effect requires multiple sample intervals to propagate, but is not implemented in the current framework.The framework detects this condition by tracking which rules have had resolution executed. On each subsequent sample, if a rule that has previously been resolved is still violated, the framework records a persistent fault entry containing:
+A fault is classified as persistent if it remains in a violated state on the next telemetry sample received after a resolution has been executed for it. There is no configurable grace period: the check occurs on the first post-resolution sample for the affected telemetry. This detection timing is not configurable through the \gls{yang} model in the current design. A configurable post-resolution observation window specifying how many samples must remain violated before escalation would reduce false persistent-fault classifications in cases where the resolution effect requires multiple sample intervals to propagate, but is not implemented in the current framework.The framework detects this condition by tracking which rules have had resolution executed. On each subsequent sample, if a rule that has previously been resolved is still violated, the framework records a persistent fault entry containing:
 
 \begin{itemize}
 \item The source and metric of the faulted telemetry.
@@ -437,11 +437,11 @@ Persistent faults are exposed through the \gls{yang} operational state model as 
 
 \textbf{Limitation:} The framework does not implement automated retry or alternative recovery strategies for persistent faults. Once a resolution has been executed and the fault persists, the framework's automated response is limited to recording the persistent fault and exposing it through the operational state model. Multi-strategy recovery planning, as proposed in \cite{ref19}, is not implemented. This is a deliberate scope constraint: implementing alternative recovery strategies would require a recovery planning component with its own state management, increasing the framework's resource footprint and decision-making overhead.
 
-\section{Resolution and Impact-Aware Suppression (RQ4)}
+\section{Resolution and Impact-Aware Suppression (RQ4)}\label{sec:resolution-suppression}
 
-Research question RQ4 asks which deterministic recovery strategies are suitable for industrial routers and how episode-aware recovery coordination can prevent redundant recovery actions, oscillations, and collateral disruption. The literature review identified that existing recovery mechanisms either assume resource-rich environments \cite{ref17,ref19,ref22} or focus on domain-specific failover \cite{ref23,ref24,ref25} without integrating episode-aware gating with dependency-coordinated suppression (Section 4.4). This section defines the resolution mechanism and the suppression model that coordinates recovery across dependent services.
+Research question RQ4 asks which deterministic recovery strategies are suitable for industrial routers and how episode-aware recovery coordination can prevent redundant recovery actions, oscillations, and collateral disruption. The literature review identified that existing recovery mechanisms either assume resource-rich environments \cite{ref17,ref19,ref22} or focus on domain-specific failover \cite{ref23,ref24,ref25} without integrating episode-aware gating with dependency-coordinated suppression (Section~\ref{sec:lit-fdir-recovery}). This section defines the resolution mechanism and the suppression model that coordinates recovery across dependent services.
 
-\subsection{Resolution Execution}
+\subsection{Resolution Execution}\label{sec:resolution-execution}
 
 When a new fault is detected, classified as a root cause (not a symptom of an upstream fault), and the current episode has not yet been resolved, the framework executes the resolution script declared in the root cause's rule definition.
 
@@ -460,17 +460,17 @@ If a rule definition does not specify a resolution script path, no automated res
 
 \textbf{Limitation:} Resolution scripts are executed through system calls (fork+exec), which is resource-intensive on embedded platforms. No resource limits, timeouts, or sandboxing are applied to resolution scripts. A misbehaving script (e.g., one that enters an infinite loop or consumes excessive memory) could affect the router's operation. This is an implementation constraint rather than a conceptual limitation: the framework's design does not preclude adding resource limits, but the current specification does not define them.
 
-\subsection{Root-Cause-Only Resolution}
+\subsection{Root-Cause-Only Resolution}\label{sec:root-cause-only}
 
-The framework executes resolution only for root cause faults, not for symptoms. When multiple faults are detected simultaneously across a dependency chain, root cause analysis (Section 5.5.3) identifies the deepest faulted telemetry in the chain. Resolution is executed for the root cause's rule, and all downstream faults are expected to clear as a consequence.
+The framework executes resolution only for root cause faults, not for symptoms. When multiple faults are detected simultaneously across a dependency chain, root cause analysis (Section~\ref{sec:root-cause-analysis}) identifies the deepest faulted telemetry in the chain. Resolution is executed for the root cause's rule, and all downstream faults are expected to clear as a consequence.
 
-This root-cause-only resolution policy prevents the cascading recovery actions identified as a limitation in existing frameworks (Section 4.7). The policy is justified by three converging lines of evidence: Popic et al. \cite{ref7} demonstrate that components with high error leakage dominate system failure, implying that resolution should target propagation sources; Dymora et al. \cite{ref16} show that recovery mechanisms in constrained networks can themselves become failure amplifiers, motivating targeted rather than broadcast recovery; and Beereddy \cite{ref17} identifies that resource-intensive recovery orchestration is misaligned with resource-bounded embedded systems.
+This root-cause-only resolution policy prevents the cascading recovery actions identified as a limitation in existing frameworks (Section~\ref{sec:lit-summary}). The policy is justified by three converging lines of evidence: Popic et al. \cite{ref7} demonstrate that components with high error leakage dominate system failure, implying that resolution should target propagation sources; Dymora et al. \cite{ref16} show that recovery mechanisms in constrained networks can themselves become failure amplifiers, motivating targeted rather than broadcast recovery; and Beereddy \cite{ref17} identifies that resource-intensive recovery orchestration is misaligned with resource-bounded embedded systems.
 
-If service A depends on service B, and both are faulted, only service B's resolution executes. Service A's fault is expected to clear once service B recovers. If it does not clear, the suppression window expires and service A's fault is re-evaluated independently (Section 5.7.3).
+If service A depends on service B, and both are faulted, only service B's resolution executes. Service A's fault is expected to clear once service B recovers. If it does not clear, the suppression window expires and service A's fault is re-evaluated independently (Section~\ref{sec:sample-count-suppression}).
 
-\subsection{Sample-Count-Based Suppression}
+\subsection{Sample-Count-Based Suppression}\label{sec:sample-count-suppression}
 
-After a resolution is executed for a root cause, all telemetries in the transitive impact set (Section 5.5.4) are suppressed for a fixed number of samples (default: 60). During suppression:
+After a resolution is executed for a root cause, all telemetries in the transitive impact set (Section~\ref{sec:transitive-impact}) are suppressed for a fixed number of samples (default: 60). During suppression:
 
 \begin{itemize}
 \item The suppression counter for each impacted telemetry is set to the suppression window size.
@@ -481,22 +481,22 @@ After a resolution is executed for a root cause, all telemetries in the transiti
 
 The use of sample counts rather than wall-clock time for suppression windows is a deliberate design choice for embedded systems. In industrial routers, telemetry sample rates may vary depending on system load, network conditions, or service configuration.  A sample-count-based window ensures that suppression duration is proportional to actual system activity rather than elapsed time: the suppression window always spans exactly the configured number of samples, regardless of how much wall-clock time elapses between them. If samples arrive slowly, the system has more wall-clock time between samples to complete recovery before the window expires. If samples arrive rapidly, the window expires in less wall-clock time, enabling faster re-evaluation. In both cases, the framework evaluates exactly the same number of post-resolution observations before deciding whether the downstream fault has cleared. This adaptive behaviour emerges naturally from the sample-count mechanism without requiring explicit timer management or clock synchronisation.
 
-\subsection{Resolution Safeguards}
+\subsection{Resolution Safeguards}\label{sec:resolution-safeguards}
 
 The framework incorporates safeguards to prevent resolution actions from causing additional harm:
 
 \begin{itemize}
-\item Once-per-episode execution: The resolved-episodes set (Section 5.6.3) ensures that resolution executes at most once per root cause per episode, preventing recovery loops. This directly addresses the limitation identified in \cite{ref20}, where stateless recovery does not prevent redundant actions.
-\item Suppression of downstream impacts: Transitive suppression (Section 5.5.4) prevents redundant resolution attempts on services that are expected to recover as a consequence of root cause resolution. This addresses the failure amplification risk demonstrated in \cite{ref16}.
-\item Persistent fault escalation: If a fault persists after resolution, it is recorded as a persistent fault (Section 5.6.4) and exposed through the operational state model, signalling to external systems that automated resolution was insufficient. This follows the escalation principle from \cite{ref2}.
+\item Once-per-episode execution: The resolved-episodes set (Section~\ref{sec:at-most-once}) ensures that resolution executes at most once per root cause per episode, preventing recovery loops. This directly addresses the limitation identified in \cite{ref20}, where stateless recovery does not prevent redundant actions.
+\item Suppression of downstream impacts: Transitive suppression (Section~\ref{sec:transitive-impact}) prevents redundant resolution attempts on services that are expected to recover as a consequence of root cause resolution. This addresses the failure amplification risk demonstrated in \cite{ref16}.
+\item Persistent fault escalation: If a fault persists after resolution, it is recorded as a persistent fault (Section~\ref{sec:persistent-fault-detection}) and exposed through the operational state model, signalling to external systems that automated resolution was insufficient. This follows the escalation principle from \cite{ref2}.
 \item Script failure handling: If a resolution script returns a non-zero exit code, the failure is logged but the episode is still marked as resolved to prevent immediate re-execution of a failing script. The persistent fault mechanism will detect the continued violation and escalate appropriately.
 \end{itemize}
 
-\section{Integrated FDIR Architecture (RQ5)}
+\section{Integrated \gls{fdir} Architecture (RQ5)}\label{sec:integrated-architecture}
 
-Research question RQ5 asks how fault characterisation, telemetry modelling, dependency representation, and recovery strategies can be integrated into a stateful \gls{fdir} architecture that coordinates root cause recovery and suppresses dependent symptom faults. The literature review identified that existing approaches treat classification, diagnosis, observability, and recovery as separate concerns \cite{ref5,ref6,ref29} and that no existing work combines cross-layer integration with explicit fault episode tracking and dependency-coordinated recovery gating in a router-specific setting (Section 4.6). This section presents the integrated architecture that composes the components defined in Sections 5.1 through 5.7 into a unified runtime system.
+Research question RQ5 asks how fault characterisation, telemetry modelling, dependency representation, and recovery strategies can be integrated into a stateful \gls{fdir} architecture that coordinates root cause recovery and suppresses dependent symptom faults. The literature review identified that existing approaches treat classification, diagnosis, observability, and recovery as separate concerns \cite{ref5,ref6,ref29} and that no existing work combines cross-layer integration with explicit fault episode tracking and dependency-coordinated recovery gating in a router-specific setting (Section~\ref{sec:lit-cross-layer}). This section presents the integrated architecture that composes the components defined in Sections 5.1 through 5.7 into a unified runtime system.
 
-\subsection{Architectural Components}
+\subsection{Architectural Components}\label{sec:architectural-components}
 
 The integrated \gls{fdir} framework consists of seven runtime components, each encapsulating a single responsibility. The modular decomposition follows the principle identified in \cite{ref21,ref29} that separating FDIR responsibilities into distinct roles supports transparent and analysable fault management. Figure 5.5 shows the component structure and data flow through the framework.
 
@@ -521,10 +521,10 @@ Tracks the violation state of each individual rule and detects state transitions
 \textbf{ResolutionEngine.}  
 Executes external resolution scripts for root cause faults. Invokes scripts through system calls and evaluates exit codes. Decoupled from detection and analysis logic through the IDataRepository interface.
 
-The IDataRepository interface abstracts the data store, allowing FaultDetector, DependencyAnalyzer, and ResolutionEngine to be tested independently of FormatterBlock. This interface-based decoupling supports the modular decomposition principle and enables unit testing, the practice of verifying individual software components in isolation by executing them against predefined inputs and asserting expected outputs, independent of the full system context of individual FDIR responsibilities.
+The IDataRepository interface abstracts the data store, allowing FaultDetector, DependencyAnalyzer, and ResolutionEngine to be tested independently of FormatterBlock. This interface-based decoupling supports the modular decomposition principle and enables unit testing, the practice of verifying individual software components in isolation by executing them against predefined inputs and asserting expected outputs, independent of the full system context of individual \gls{fdir} responsibilities.
 
 
-\subsection{Processing Pipeline}
+\subsection{Processing Pipeline}\label{sec:processing-pipeline}
 
 The framework processes data in a seven-phase pipeline that is executed on each processing cycle. The phases are designed to ensure deterministic processing order (Principle 2) and bounded resource usage (Principle 5):
 
@@ -542,7 +542,7 @@ Telemetry definitions and rule definitions are registered in the data stores. Th
 Sample events are grouped by telemetry ID and matched to their telemetry definitions.
 
 \textbf{Phase 5: Topological Sort.}  
-The telemetry IDs with pending samples are sorted in dependency order using a depth-first topological sort on the dependency graph. This ensures that upstream telemetries are processed before downstream telemetries within the same cycle (Section 5.5.2).
+The telemetry IDs with pending samples are sorted in dependency order using a depth-first topological sort on the dependency graph. This ensures that upstream telemetries are processed before downstream telemetries within the same cycle (Section~\ref{sec:dependency-ordered-processing}).
 
 
 \textbf{Phase 6: Timestamp Sort.}
@@ -577,9 +577,9 @@ For each telemetry ID in topological order, and for each sample in timestamp ord
   \label{fig:sample-processing-flow}
 \end{figure}
 
-This pipeline integrates the four capabilities that the literature review identified as separately addressed but never unified (Section 4.7): fault characterisation (steps 3, 5), dependency reasoning (steps 7a, 7e), episode tracking (steps 5, 6), and recovery coordination (steps 7c, 7d).
+This pipeline integrates the four capabilities that the literature review identified as separately addressed but never unified (Section~\ref{sec:lit-summary}): fault characterisation (steps 3, 5), dependency reasoning (steps 7a, 7e), episode tracking (steps 5, 6), and recovery coordination (steps 7c, 7d).
 
-\subsection{Data Flow}
+\subsection{Data Flow}\label{sec:data-flow}
 
 This section describes the path that data follows through the architecture and explains the state ownership model that governs where mutable data resides.
 
@@ -588,16 +588,16 @@ Data enters the framework from two external sources and flows through a unidirec
 \begin{figure}[htbp]
   \centering
   \includegraphics[width=\textwidth]{data-flow.png}
-  \caption{FDIR data flow}
+  \caption{\gls{fdir} data flow}
   \label{fig:data-flow}
 \end{figure}
-The diagram shows the primary data flow through the processing pipeline. Two aspects are simplified for clarity: (1)~telemetry definitions and rule definitions may also arrive via the message bus (east-west path) in addition to the YANG/NETCONF configuration path shown; and (2)~the persistent fault escalation path is not depicted when a fault persists after resolution, the framework records a persistent fault entry and exposes it through the YANG/NETCONF operational state model for external escalation (Section~5.6.4).
+The diagram shows the primary data flow through the processing pipeline. Two aspects are simplified for clarity: (1)~telemetry definitions and rule definitions may also arrive via the message bus (east-west path) in addition to the \gls{yang}/\gls{netconf} configuration path shown; and (2)~the persistent fault escalation path is not depicted when a fault persists after resolution, the framework records a persistent fault entry and exposes it through the \gls{yang}/\gls{netconf} operational state model for external escalation (Section~\ref{sec:persistent-fault-detection}).
 
 \textbf{State ownership model.} The FormatterBlock is the only component that maintains the authoritative mutable state (telemetry definitions, rule definitions, samples, fault records, suppression counters, episode state, resolved-episodes set). All other components either maintain only their own local tracking state (RuleStateTracker, EpisodeManager) or are stateless with respect to fault data (FaultDetector, ResolutionEngine operate through the IDataRepository interface). This concentration of authoritative state in a single component is a design decision that trades modularity for consistency: a distributed state model would require synchronisation mechanisms that add overhead and non-determinism, conflicting with Principle 2 and Principle 5.
 
 \textbf{Limitation:} The centralised state model means that FormatterBlock is a single point of coupling. All components depend on it through the IDataRepository interface. This creates a monolithic coordinator that is difficult to decompose further without introducing inter-component communication overhead. The trade-off is accepted because the alternative distributed state with synchronisation would introduce non-deterministic timing behaviour incompatible with the framework's determinism requirements.
 
-\subsection{Configuration Model}
+\subsection{Configuration Model}\label{sec:configuration-model}
 
 The framework is configured through a \gls{yang} data model that defines:
 
@@ -611,13 +611,13 @@ Configuration is delivered through the standard \gls{netconf} transaction mechan
 
 The \gls{yang} model supports runtime reconfiguration: telemetry definitions and rules can be added, modified, or removed through \gls{netconf} operations. The framework validates the updated configuration, rebuilds the dependency graph, and enables or disables rules as appropriate. This supports incremental deployment and adaptation to evolving service architectures without requiring framework restarts.
 
-\subsection{Concurrency Model}
+\subsection{Concurrency Model}\label{sec:concurrency-model}
 
 The framework uses a single-threaded processing model for the \gls{fdir} pipeline, with asynchronous event ingestion from message bus callbacks. The EventQueue decouples the asynchronous ingestion from the synchronous processing pipeline. A recursive mutex protects shared state during configuration and sample processing phases. The processing pipeline is designed to minimise lock hold times through a snapshot-based approach: events are dequeued under lock into local copies, and processing proceeds on the local copies.
 
 This concurrency model ensures thread safety (NFR11) while maintaining deterministic processing order (NFR2). The single-threaded processing model means that the framework's behaviour is fully determined by the order of events in the queue, not by thread scheduling decisions.
 
-\section{Summary and Traceability}
+\section{Summary and Traceability}\label{sec:conception-summary}
 
 This chapter presented the conceptual design of a stateful \gls{fdir} framework for \gls{soa}-based industrial routers, addressing the five research questions defined in Chapter 3. Each design decision is traceable to either a literature-identified gap, a literature-justified principle, or an explicitly stated constraint. Table~\ref{tab:traceability} summarises this traceability.
 
@@ -630,7 +630,7 @@ This chapter presented the conceptual design of a stateful \gls{fdir} framework 
 Section & RQ & Core Design Decision & Gap / Justification \\
 \midrule
 5.1 & RQ5 & Internal SOA service placement & Integration with \gls{yang}/\gls{netconf} workflows \cite{ref15,ref21,ref29} \\
-5.2 & All & Definition of 8 FRs, 11 NFRs, and 5 design principles & Derived from Chapter 1 problem definition and Chapter 4 identified gaps \\
+5.2 & All & Definition of 8 FRs, 11 NFRs, and 5 design principles & Derived from Chapter~\ref{chap:introduction} problem definition and Chapter~\ref{chap:literature-review-results} identified gaps \\
 5.3 & RQ2 & Structured telemetry model with bounded event queue & Existing telemetry frameworks lack episode state \cite{ref13,ref14}; resource constraints highlighted in \cite{ref17} \\
 5.4 & RQ1 & Threshold-based rules with rising-edge transition detection & Fault taxonomies lack runtime episode differentiation \cite{ref1,ref3,ref5} \\
 5.5 & RQ3 & Directed dependency graph with topological processing & Dependency models lack runtime coupling to recovery \cite{ref7,ref8,ref9,ref10,ref11,ref12,ref27} \\
@@ -644,10 +644,10 @@ Section & RQ & Core Design Decision & Gap / Justification \\
 The following limitations are acknowledged:
 
 \begin{itemize}
-\item The framework cannot monitor the infrastructure (message bus, \gls{netconf}) on which it depends (Section 5.1.2).
-\item Rule evaluation is limited to single-threshold comparisons on individual metrics (Section 5.4.1).
-\item The dependency model does not distinguish dependency types or conditional propagation (Section 5.5.1).
-\item Cycle handling in the dependency graph is implicit rather than configurable (Section 5.5.2).
+\item The framework cannot monitor the infrastructure (message bus, \gls{netconf}) on which it depends (Section~\ref{sec:chosen-approach}).
+\item Rule evaluation is limited to single-threshold comparisons on individual metrics (Section~\ref{sec:rule-evaluation}).
+\item The dependency model does not distinguish dependency types or conditional propagation (Section~\ref{sec:dependency-graph-structure}).
+\item Cycle handling in the dependency graph is implicit rather than configurable (Section~\ref{sec:dependency-ordered-processing}).
 \end{itemize}
 
 These limitations define the boundary of the current contribution and identify directions for future work. The following chapter describes the prototype implementation of this framework on an industrial router platform and the technical decisions made to realise the conceptual design within the constraints of the target environment.
