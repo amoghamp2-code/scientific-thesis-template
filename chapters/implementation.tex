@@ -2,13 +2,13 @@ The previous chapter presented the conceptual design of a stateful \gls{fdir} fr
 
 The chapter describes only what was implemented and how. Design rationale and literature justification are not repeated from Chapter~\ref{chap:conception} unless necessary to explain an implementation deviation. Where the prototype deviates from the conceptual design, the deviation is stated explicitly and justified. Where features defined in the conception are not implemented, this is documented in the limitations section.
 
-\subsection{System Overview: What Is Implemented}\label{sec:impl-overview}
+\section{System Overview: What Is Implemented}\label{sec:impl-overview}
 
 The prototype is a C++20 application named \texttt{prism-police} that runs as a long-lived daemon process on a Belden/Hirschmann industrial router platform. The application subscribes to the platform's message bus, receives telemetry definitions, monitoring rules, and telemetry samples at runtime, evaluates samples against threshold-based rules, performs root-cause analysis through declared dependency chains, executes external resolution scripts, and tracks fault episodes as stateful runtime entities.
 
 The prototype implements the complete \gls{fdir} processing pipeline defined in Section~\ref{sec:processing-pipeline}: event ingestion, validation, configuration processing, dependency-ordered sample evaluation, rule-based fault detection, episode lifecycle management, root cause analysis, resolution execution, transitive impact suppression, and persistent fault detection. Configuration is delivered through the platform's \gls{yang}/\gls{netconf} infrastructure, and telemetry samples are received through the ZeroMQ-based message bus.
 
-\subsubsection{Target Platform}\label{sec:target-platform}
+\subsection{Target Platform}\label{sec:target-platform}
 
 The prototype is deployed on the Belden/Hirschmann PRISM platform, an \gls{soa}-based industrial router environment (the platform architecture is illustrated in Figure~\ref{fig:fdir-placement-within-soa}). The platform provides:
 
@@ -21,7 +21,7 @@ The prototype is deployed on the Belden/Hirschmann PRISM platform, an \gls{soa}-
 
 The prototype integrates with these platform services as a regular \gls{soa} participant, consistent with the internal-service placement decision described in Section~\ref{sec:chosen-approach}.
 
-\subsection{Architecture Realisation}\label{sec:architecture-realisation}
+\section{Architecture Realisation}\label{sec:architecture-realisation}
 
 This section maps the seven conceptual components defined in Section 5.8.1 to their implementation in the prototype. Table~\ref{tab:component-mapping} provides the mapping.
 
@@ -74,11 +74,11 @@ Figures~\ref{fig:plantuml1} and~\ref{fig:plantuml2} show the class structure of 
 \end{figure}
 
 
-\subsection{Component Description}\label{sec:component-description}
+\section{Component Description}\label{sec:component-description}
 
 This section describes each implemented component, its responsibilities, and its interactions with other components.
 
-\subsubsection{InputBlock}
+\subsection{InputBlock}
 
 \texttt{InputBlock} serves as the ingestion and validation gate. It receives telemetry definitions, rule definitions, and telemetry samples from external sources and enforces the validation constraints defined in Section~\ref{sec:ingestion-validation}:
 
@@ -92,7 +92,7 @@ This section describes each implemented component, its responsibilities, and its
 
 Validated, non-duplicate inputs are forwarded to \texttt{FormatterBlock} for enqueuing into the \texttt{EventQueue}.
 
-\subsubsection{FormatterBlock}
+\subsection{FormatterBlock}
 
 \texttt{FormatterBlock} is the central coordinator, implemented using the Facade pattern. It is the largest component in the prototype and fulfils two roles:
 
@@ -115,7 +115,7 @@ State management within \texttt{FormatterBlock} includes:
 
 When rule definitions change, \texttt{FormatterBlock} invokes \texttt{rebuildAllDependencies()} to reconstruct the forward and reverse dependency graphs from the updated rule declarations. Configuration validation is triggered lazily: the \texttt{configDirty} atomic flag is set when rules change, and \texttt{validateAndEnableConfig()} is called on the next sample arrival, disabling rules whose \texttt{DependsOn} references cannot be resolved to registered telemetry IDs (FR8).
 
-\subsubsection{FaultDetector}
+\subsection{FaultDetector}
 
 \texttt{FaultDetector} evaluates telemetry samples against registered rules. For each rule matching the incoming sample's source and metric, it compares the sample value against the rule's threshold using the declared operator (greater than, less than, equal, not equal, greater than or equal, less than or equal). If the comparison evaluates to true, a \texttt{FaultStatus} entry is created and stored in the repository. Disabled rules are skipped. If the telemetry ID is currently suppressed, the fault is created with the \texttt{IsSuppressed} flag set to true.
 
@@ -123,7 +123,7 @@ Scope reduction from conception: The conceptual design specifies that rule evalu
 
 Scope reduction from conception: All faults are assigned \texttt{Severity::Critical}. The \texttt{Severity} enum defines multiple levels, but only Critical is used.
 
-\subsubsection{EpisodeManager}
+\subsection{EpisodeManager}
 
 \texttt{EpisodeManager} tracks the fault episode lifecycle for each telemetry ID. It maintains:
 
@@ -136,23 +136,23 @@ Scope reduction from conception: All faults are assigned \texttt{Severity::Criti
 
 State transitions follow Section~\ref{sec:episode-lifecycle}. The \texttt{checkAndUpdateEpisode()} method returns true only on episode start.
 
-\subsubsection{RuleStateTracker}
+\subsection{RuleStateTracker}
 
 \texttt{RuleStateTracker} tracks per-rule violation state. The method \texttt{updateState(ruleId, isViolatedNow)} returns true only on rising-edge transitions.
 
-\subsubsection{ResolutionEngine}
+\subsection{ResolutionEngine}
 
 \texttt{ResolutionEngine} executes external resolution scripts. It retrieves \texttt{ResolutionFilePath} and invokes it via \texttt{std::system()}. Exit code 0 indicates success.
 
-\subsubsection{EventQueue}
+\subsection{EventQueue}
 
 \texttt{EventQueue} is a bounded FIFO buffer (capacity 1000) implemented with \texttt{std::deque} and \texttt{std::mutex}. It uses a drop-oldest policy.
 
-\subsubsection{IDataRepository}
+\subsection{IDataRepository}
 
 \texttt{IDataRepository} is an abstract interface decoupling components from \texttt{FormatterBlock}. It enables unit testing via mock implementations.
 
-\subsection{Data Model Implementation}\label{sec:data-model-impl}
+\section{Data Model Implementation}\label{sec:data-model-impl}
 
 The prototype defines its core data structures in \texttt{telemetry\_types.hpp}.
 
@@ -205,9 +205,9 @@ PersistentFaultData contains:
 
 The data structures listed above are mapped to a \gls{yang} data model that defines both the configuration interface (telemetry definitions, rule definitions) and the read-only operational state (persistent fault entries). The \gls{yang} model serves as the contract between the framework and external management systems accessing the router via \gls{netconf} (Section~\ref{sec:configuration-model}).
 
-\subsection{Data Flow and Control Flow}\label{sec:impl-data-flow}
+\section{Data Flow and Control Flow}\label{sec:impl-data-flow}
 
-\subsubsection{Ingestion Paths}\label{sec:ingestion-paths}
+\subsection{Ingestion Paths}\label{sec:ingestion-paths}
 
 The prototype receives data through two paths:
 
@@ -218,7 +218,7 @@ The prototype receives data through two paths:
 
 Both paths converge at \texttt{InputBlock}.
 
-\subsubsection{Processing Pipeline}
+\subsection{Processing Pipeline}
 
 The main loop calls \texttt{FormatterBlock::processAllEvents()} every 100 ms using \texttt{std::this\_thread::sleep\_for()}.
 
@@ -254,7 +254,7 @@ Batch constraints:
 \item \texttt{kMaxFlushAge = 1000ms}
 \end{itemize}
 
-\subsubsection{Dependency Graph Construction}
+\subsection{Dependency Graph Construction}
 
 Dependencies are declared in \texttt{RuleDefinition.DependsOn}. The method \texttt{rebuildAllDependencies()} constructs:
 
@@ -263,16 +263,16 @@ Dependencies are declared in \texttt{RuleDefinition.DependsOn}. The method \text
 \item \texttt{reverseDependencies}
 \end{itemize}
 
-\subsubsection{Root-Cause Traversal}
+\subsection{Root-Cause Traversal}
 
 Traversal uses \gls{dfs} with visited set and follows \texttt{DependsOn} chains. Selection is greedy and order-dependent.
 
-\subsubsection{Transitive Impact Computation and Suppression}
+\subsection{Transitive Impact Computation and Suppression}
 
 Impacts are computed via \gls{bfs} over \texttt{reverseDependencies}. Suppression window is 60 samples.
-\subsection{Implementation Details}\label{sec:impl-details}
+\section{Implementation Details}\label{sec:impl-details}
 
-\subsubsection{Technology Stack}
+\subsection{Technology Stack}
 
 Table~\ref{tab:technology-stack} lists the technologies used in the prototype implementation.
 
@@ -298,7 +298,7 @@ Boost Test & Unit testing framework \\
 \end{tabular}
 \end{table}
 
-\subsubsection{Concurrency Model}
+\subsection{Concurrency Model}
 
 The prototype uses a single-threaded processing model for the \gls{fdir} pipeline. The main loop is the sole consumer of the \texttt{EventQueue}. Message bus callbacks from \texttt{PrismPoliceCallbacks} arrive asynchronously on platform threads and enqueue events into the thread-safe \texttt{EventQueue}. All \gls{fdir} processing is serialised through \texttt{processAllEvents()}.
 
@@ -308,7 +308,7 @@ The processing pipeline minimises lock hold times through a snapshot-based appro
 
 This model ensures that the framework's behaviour is determined by the order of events in the queue, not by thread scheduling decisions, supporting the determinism requirement (NFR2, NFR11).
 
-\subsubsection{Design Trade-Offs}
+\subsection{Design Trade-Offs}
 
 Centralised state in FormatterBlock. All authoritative mutable state resides in \texttt{FormatterBlock}, which implements the \texttt{IDataRepository} interface. This creates a monolithic coordinator where all components depend on a single class. The trade-off is consistency over modularity: a distributed state model would require synchronisation mechanisms that add overhead and non-deterministic timing behaviour. For the prototype, the centralised model ensures that all state transitions are serialised and observable.
 
@@ -316,11 +316,11 @@ Inline root-cause traversal. As noted in Section~\ref{sec:architecture-realisati
 
 Resolution via \texttt{std::system()}. Resolution scripts are executed through \texttt{std::system()}, which invokes \texttt{fork()} and \texttt{exec()} on the underlying platform. This is resource-intensive on embedded systems. No resource limits, timeouts, or sandboxing are applied to resolution scripts. A misbehaving script (infinite loop, excessive memory consumption) could affect router operation. This is an accepted implementation constraint; the conceptual design acknowledges this limitation in Section~\ref{sec:resolution-execution}.
 
-\subsection{Testing Strategy}\label{sec:testing-strategy}
+\section{Testing Strategy}\label{sec:testing-strategy}
 
 The prototype is validated through a structured unit test suite implemented using the Boost.Test framework. The test suite serves two purposes: verifying the correctness of individual components and establishing traceability between implemented behaviour and the functional and non-functional requirements defined in Section~\ref{sec:requirements-principles}.
 
-\subsubsection{Test-Based Validation Approach}
+\subsection{Test-Based Validation Approach}
 
 Each test case is identified by a unique test ID (T01--T47) and is mapped to one or more requirements. The test suite is organised into the test files listed in Table~\ref{tab:test-files-scope}.
 
@@ -354,7 +354,7 @@ Test File & Scope \\
 
 Tests are compiled with the \texttt{UNIT\_TEST} preprocessor flag, which enables internal state accessors in \texttt{FormatterBlock} (e.g., \texttt{isTelemetryActive()}, \texttt{getEpisodeId()}, \texttt{getFault()}, \texttt{isSuppressed()}, \texttt{hasResolutionExecuted()}) without modifying the production interface.
 
-\subsubsection{Test Design Principles}
+\subsection{Test Design Principles}
 
 The test suite follows three principles:
 
@@ -366,7 +366,7 @@ Third, tests verify observable state changes (episode IDs, active/inactive statu
 
 The test scenarios cover fault detection, episode lifecycle transitions, dependency chain traversal, resolution execution, suppression mechanics, and persistent fault detection. These scenarios are documented in the test specification (Table~\ref{tab:test-specification}).
 \FloatBarrier
-\subsection{Test Traceability Matrix}\label{sec:test-traceability}
+\section{Test Traceability Matrix}\label{sec:test-traceability}
 
 Table~\ref{tab:test-traceability-matrix} maps each requirement to the test cases that validate it. This matrix ensures that every functional and non-functional requirement defined in Section 5.2 is covered by at least one test case, and that the coverage relationship is explicit and auditable.
 
@@ -401,7 +401,7 @@ NFR11 & Thread-safe concurrent operation & T22, T30 \\
 \label{tab:test-traceability-matrix}
 \end{table}
 \FloatBarrier
-\subsection{Test Specification}\label{sec:test-specification}
+\section{Test Specification}\label{sec:test-specification}
 
 Table~\ref{tab:test-specification} provides the detailed test specification. For each test, the table lists the Boost.Test case name, the requirements verified, and the expected result that constitutes a pass.
 
@@ -465,11 +465,11 @@ T47 & Callback\_Rule\_Violation\_Via\_Input & Integration & Callback rule violat
 \end{tabular}
 \end{table}
 
-\subsection{Limitations of the Prototype}\label{sec:impl-limitations}
+\section{Limitations of the Prototype}\label{sec:impl-limitations}
 
 This section documents the features defined in the conceptual design (Chapter~\ref{chap:conception}) that are not implemented in the prototype, as well as implementation constraints that affect the prototype's applicability.
 
-\subsubsection{Features Not Implemented}
+\subsection{Features Not Implemented}
 
 Graduated severity assignment. All detected faults are assigned \texttt{Severity::Critical}. The six-level severity enum is defined but not used for differentiated fault classification or recovery selection (Section~\ref{sec:fault-record-creation}).
 
@@ -479,7 +479,7 @@ Recovery retry or alternative strategies. Resolution executes at most once per e
 
 Configuration rollback. If a \gls{yang}/\gls{netconf} configuration commit introduces invalid or undesirable rule definitions (e.g., rules that create dependency cycles or reference non-existent telemetry sources), the framework applies the new configuration but provides no mechanism to revert to the previous set of telemetry definitions and rule definitions. Rollback must be performed externally through the \gls{netconf} server by re-committing the prior configuration.
 
-\subsection{Summary}\label{sec:impl-summary}
+\section{Summary}\label{sec:impl-summary}
 
 This chapter described the prototype implementation of the stateful \gls{fdir} framework on the Belden/Hirschmann PRISM industrial router platform. The unit test suite executes in a host-compiled environment using mock message bus interfaces. Integration tests T46 and T47 verify the callback interface against the platform's ZeroMQ message bus abstraction layer; full end-to-end validation on the physical router hardware is performed as part of the platform's module test infrastructure (Section~6.5.1) but is not included in the automated unit test suite. The prototype realises the seven conceptual components defined in Section~\ref{sec:architectural-components} as C++20 classes, integrated through the \texttt{IDataRepository} interface and coordinated by \texttt{FormatterBlock} as the central facade. Two platform integration layers (\texttt{PrismPoliceCallbacks}, \texttt{PrismPoliceConfigCache}) bridge the PRISM platform's ZeroMQ message bus and \gls{yang}/\gls{netconf} configuration engine to the framework's internal data model.
 
