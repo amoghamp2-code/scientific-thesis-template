@@ -231,7 +231,7 @@ All incoming data passes through a validation layer before entering the processi
 \begin{itemize}
 \item Source and metric names must be non-empty strings.
 \item Timestamps must be valid (non-negative).
-\item Numeric values must not be NaN or infinity.
+\item Rejects telemetry samples with empty source or metric names, negative timestamps, or IEEE~754 special values (NaN and infinity, detected via \texttt{std::isnan()} and \texttt{std::isinf()} from the C++ standard library header \texttt{<cmath>}).
 \item Rule operators and thresholds must be consistent with the declared data type.
 \item Duplicate definitions (same source and metric) are handled idempotently: the existing definition is updated rather than creating a duplicate.
 \item Dependency references in rule definitions are validated at configuration time. Rules referencing undefined dependencies are disabled until all dependencies are resolvable (FR8).
@@ -336,7 +336,7 @@ This ensures that upstream telemetry is evaluated before downstream telemetry wi
 
 The topological sort uses a depth-first traversal with cycle detection. If a cycle is detected in the dependency graph ($A$ depends on $B$, $B$ depends on $A$), the cycle is broken by treating the first-visited node as the traversal boundary, preventing infinite recursion. Within each topological level, samples are further sorted by timestamp to ensure deterministic processing order (Principle 2).
 
-Limitation: The cycle-handling strategy breaks cycles during traversal rather than rejecting them as configuration errors at configuration time. When a cycle is detected, the back-edge node is skipped and the cycle is logged as a warning to ensure operator visibility (NFR6). However, the processing order within a cycle depends on which node is visited first during the DFS traversal, which is determined by the iteration order of the internal data structure. While the result is deterministic for a given configuration, it is not explicitly controllable by the operator. To ensure fully deterministic cycle- breaking independent of internal data structure ordering, adjacency lists should be sorted by telemetry ID before traversal. The prototype does not implement this sorting. A future extension could additionally validate the dependency graph for acyclicity at configuration time and reject cyclic declarations.
+Limitation: The cycle-handling strategy breaks cycles during traversal rather than rejecting them as configuration errors at configuration time. When a cycle is detected, the back-edge node is skipped and the cycle is logged as a warning to ensure operator visibility (NFR6). However, the processing order within a cycle depends on which node is visited first during the \gls{dfs} traversal, which is determined by the iteration order of the internal data structure. While the result is deterministic for a given configuration, it is not explicitly controllable by the operator. To ensure fully deterministic cycle- breaking independent of internal data structure ordering, adjacency lists should be sorted by telemetry ID before traversal. The prototype does not implement this sorting. A future extension could additionally validate the dependency graph for acyclicity at configuration time and reject cyclic declarations.
 
 \subsection{Root Cause Analysis}
 
@@ -498,13 +498,13 @@ Research question RQ5 asks how fault characterisation, telemetry modelling, depe
 
 \subsection{Architectural Components}
 
-The integrated \gls{fdir} framework consists of seven runtime components, each encapsulating a single responsibility. The modular decomposition follows the principle identified in \cite{ref21,ref29} that separating FDIR responsibilities into distinct roles supports transparent and analysable fault management:
+The integrated \gls{fdir} framework consists of seven runtime components, each encapsulating a single responsibility. The modular decomposition follows the principle identified in \cite{ref21,ref29} that separating FDIR responsibilities into distinct roles supports transparent and analysable fault management. Figure 5.5 shows the component structure and data flow through the framework.
 
 \textbf{InputBlock.}  
-The ingestion and validation layer. Receives telemetry definitions, rule definitions, and telemetry samples from external sources (\gls{yang}/\gls{netconf} configuration and message bus). Validates all incoming data against structural and semantic constraints. Forwards valid data to the FormatterBlock. Rejects invalid data with appropriate logging. Implements idempotency checks to prevent duplicate registrations.
+The ingestion and validation layer. Receives telemetry definitions, rule definitions, and telemetry samples from external sources (\gls{yang}/\gls{netconf} configuration and message bus).  Validates all incoming data against structural and semantic constraints. Enqueues valid data into the EventQueue for ordered processing by the FormatterBlock. Rejects invalid data with appropriate logging. Implements idempotency checks to prevent duplicate registrations.
 
 \textbf{FormatterBlock.}  
-The central coordinator, implemented as a facade that owns and orchestrates all other components. Maintains the authoritative data stores for telemetry definitions, rule definitions, samples, fault records, and suppression state. Implements the IDataRepository interface through which other components access shared state. Coordinates the processing pipeline from event dequeuing through resolution execution.
+The central coordinator, implemented as a facade, a structural design pattern in object-oriented software engineering in which a single class provides a unified interface to a set of subsystem components, delegating calls to the appropriate internal objects while hiding their individual interfaces from external clients. FormatterBlock owns and orchestrates all other components. It maintains the authoritative data stores for telemetry definitions, rule definitions, samples, fault records, and suppression state. It implements the IDataRepository interface through which other components access shared state. It coordinates the processing pipeline from event dequeuing through resolution execution.
 
 \textbf{EventQueue.}  
 A bounded, thread-safe FIFO queue that decouples data ingestion from processing. Events (telemetry definitions, rule definitions, samples) are enqueued by the InputBlock and dequeued by the FormatterBlock during processing cycles. The queue has a fixed maximum size (default: 1000 events) and implements a drop-oldest overflow policy, ensuring bounded memory usage (NFR4).
@@ -521,14 +521,16 @@ Tracks the violation state of each individual rule and detects state transitions
 \textbf{ResolutionEngine.}  
 Executes external resolution scripts for root cause faults. Invokes scripts through system calls and evaluates exit codes. Decoupled from detection and analysis logic through the IDataRepository interface.
 
-The IDataRepository interface abstracts the data store, allowing FaultDetector, DependencyAnalyzer, and ResolutionEngine to be tested independently of FormatterBlock. This interface-based decoupling supports the modular decomposition principle and enables unit testing of individual \gls{fdir} responsibilities without requiring the full system context.
+The IDataRepository interface abstracts the data store, allowing FaultDetector, DependencyAnalyzer, and ResolutionEngine to be tested independently of FormatterBlock. This interface-based decoupling supports the modular decomposition principle and enables unit testing, the practice of verifying individual software components in isolation by executing them against predefined inputs and asserting expected outputs, independent of the full system context of individual FDIR responsibilities.
+
 
 \subsection{Processing Pipeline}
 
 The framework processes data in a seven-phase pipeline that is executed on each processing cycle. The phases are designed to ensure deterministic processing order (Principle 2) and bounded resource usage (Principle 5):
 
-\textbf{Phase 1: Event Dequeuing.}  
-All pending events are dequeued from the EventQueue into a local buffer. This is a short operation that releases the queue for concurrent producers.
+\textbf{Phase 1: Event Dequeuing.} 
+The EventQueue is a shared data structure: asynchronous message bus callbacks enqueue events concurrently while the processing thread consumes them. To prevent data corruption, access to the queue is protected by a mutual exclusion lock. If the processing thread were to hold this lock for the entire duration of Phases 2 through 7, concurrent producers would be blocked from enqueuing new events until processing completes — potentially for tens of milliseconds under high load. To avoid this, Phase 1 drains all pending events from the queue into a local buffer in a single short critical section. Once the buffer is populated, the lock is released immediately. All subsequent processing (Phases 2–7) operates exclusively on this local buffer, and the queue is free to accept new events from concurrent producers without contention. The local buffer is therefore not an additional storage layer but a mechanism to decouple ingestion from processing: it bounds the lock-hold duration to the time required for a single dequeue operation rather than the time required for the full processing pipeline.
+
 
 \textbf{Phase 2: Event Classification.}  
 Events are separated into configuration events (telemetry definitions, rule definitions) and sample events. Configuration events are processed before samples to ensure that the data model is up to date before rule evaluation begins.
@@ -542,8 +544,10 @@ Sample events are grouped by telemetry ID and matched to their telemetry definit
 \textbf{Phase 5: Topological Sort.}  
 The telemetry IDs with pending samples are sorted in dependency order using a depth-first topological sort on the dependency graph. This ensures that upstream telemetries are processed before downstream telemetries within the same cycle (Section 5.5.2).
 
-\textbf{Phase 6: Timestamp Sort.}  
-Within each telemetry ID, samples are sorted by timestamp. Late-arriving samples (with timestamps earlier than the last processed sample for that telemetry) are dropped to maintain temporal consistency.
+
+\textbf{Phase 6: Timestamp Sort.}
+Within each telemetry ID, samples are sorted by timestamp using a stable sort that preserves the relative arrival order of samples with equal timestamps. Samples with timestamps equal to or earlier than the last processed timestamp for that telemetry are dropped as late arrivals to maintain temporal consistency. Duplicate samples---multiple samples from the same telemetry source carrying identical timestamps, are not explicitly deduplicated at this stage; if two samples share the same timestamp and both are newer than the last processed timestamp, both are processed in their stable-sorted arrival order. Because rule evaluation is deterministic (Principle~2), processing duplicate-timestamp samples produces a deterministic outcome, though the second sample may trigger a redundant evaluation that yields no state change if the first sample already established the current rule state.
+
 
 \textbf{Phase 7: Sample Processing.}  
 For each telemetry ID in topological order, and for each sample in timestamp order, the framework executes the core \gls{fdir} logic:
@@ -577,7 +581,9 @@ This pipeline integrates the four capabilities that the literature review identi
 
 \subsection{Data Flow}
 
-The data flow through the architecture follows a unidirectional pipeline with concentrated mutable state:
+This section describes the path that data follows through the architecture and explains the state ownership model that governs where mutable data resides.
+
+Data enters the framework from two external sources and flows through a unidirectional pipeline. Figure~\ref{fig:data-flow} illustrates this flow.
 
 \begin{figure}[htbp]
   \centering
@@ -585,8 +591,9 @@ The data flow through the architecture follows a unidirectional pipeline with co
   \caption{FDIR data flow}
   \label{fig:data-flow}
 \end{figure}
+The diagram shows the primary data flow through the processing pipeline. Two aspects are simplified for clarity: (1)~telemetry definitions and rule definitions may also arrive via the message bus (east-west path) in addition to the YANG/NETCONF configuration path shown; and (2)~the persistent fault escalation path is not depicted when a fault persists after resolution, the framework records a persistent fault entry and exposes it through the YANG/NETCONF operational state model for external escalation (Section~5.6.4).
 
-The FormatterBlock is the only component that maintains the authoritative mutable state (telemetry definitions, rule definitions, samples, fault records, suppression counters, episode state, resolved-episodes set). All other components either maintain only their own local tracking state (RuleStateTracker, EpisodeManager) or are stateless with respect to fault data (FaultDetector, ResolutionEngine operate through the IDataRepository interface). This concentration of authoritative state in a single component is a design decision that trades modularity for consistency: a distributed state model would require synchronisation mechanisms that add overhead and non-determinism, conflicting with Principle 2 and Principle 5.
+\textbf{State ownership model.} The FormatterBlock is the only component that maintains the authoritative mutable state (telemetry definitions, rule definitions, samples, fault records, suppression counters, episode state, resolved-episodes set). All other components either maintain only their own local tracking state (RuleStateTracker, EpisodeManager) or are stateless with respect to fault data (FaultDetector, ResolutionEngine operate through the IDataRepository interface). This concentration of authoritative state in a single component is a design decision that trades modularity for consistency: a distributed state model would require synchronisation mechanisms that add overhead and non-determinism, conflicting with Principle 2 and Principle 5.
 
 \textbf{Limitation:} The centralised state model means that FormatterBlock is a single point of coupling. All components depend on it through the IDataRepository interface. This creates a monolithic coordinator that is difficult to decompose further without introducing inter-component communication overhead. The trade-off is accepted because the alternative distributed state with synchronisation would introduce non-deterministic timing behaviour incompatible with the framework's determinism requirements.
 
@@ -612,7 +619,7 @@ This concurrency model ensures thread safety (NFR11) while maintaining determini
 
 \section{Summary and Traceability}
 
-This chapter presented the conceptual design of a stateful \gls{fdir} framework for \gls{soa}-based industrial routers, addressing the five research questions defined in Chapter 3. Each design decision is traceable to either a literature-identified gap, a literature-justified principle, or an explicitly stated constraint. Table summarises this traceability.
+This chapter presented the conceptual design of a stateful \gls{fdir} framework for \gls{soa}-based industrial routers, addressing the five research questions defined in Chapter 3. Each design decision is traceable to either a literature-identified gap, a literature-justified principle, or an explicitly stated constraint. Table~\ref{tab:traceability} summarises this traceability.
 
 \begin{table}[htbp]
 \centering

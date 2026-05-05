@@ -10,11 +10,11 @@ The prototype implements the complete \gls{fdir} processing pipeline defined in 
 
 \subsubsection{Target Platform}
 
-The prototype is deployed on the Belden/Hirschmann PRISM platform, an \gls{soa}-based industrial router environment. The platform provides:
+The prototype is deployed on the Belden/Hirschmann PRISM platform, an \gls{soa}-based industrial router environment (the platform architecture is illustrated in Figure~\ref{fig:fdir-placement-within-soa}). The platform provides:
 
 \begin{itemize}
 \item A ZeroMQ-based message bus for inter-service communication.
-\item A \gls{yang}/\gls{netconf} configuration engine (\texttt{netconfd-pro}) for declarative service configuration.
+\item A YANG/NETCONF configuration engine (\texttt{netconfd-pro}, the platform's NETCONF server implementation) for declarative service configuration.
 \item A service lifecycle manager that coordinates startup, shutdown, and restart of platform services.
 \item A structured logging infrastructure (\texttt{bil\_log}) for component-tagged diagnostic output.
 \end{itemize}
@@ -58,18 +58,19 @@ The root-cause traversal algorithm described in Section 5.5.3 is implemented wit
 The \texttt{DependencyAnalyzer} class provides an equivalent \texttt{findRootCause()} method and is available for use in configurations where the traversal logic is invoked from outside the main processing pipeline.
 
 \begin{figure}[htbp]
-\centering
-\includegraphics[width=\textwidth]{plantuml-architecture-1.png}
-\caption{PlantUML architecture diagram 1}
-\label{fig:plantuml1}
+  \centering
+  \includegraphics[width=\textwidth]{plantuml-architecture-1.pdf}
+  \caption{Class diagram of the FDIR framework components and their relationships}
+  \label{fig:plantuml1}
 \end{figure}
 
 \begin{figure}[htbp]
-\centering
-\includegraphics[width=\textwidth]{plantuml-architecture-2.png}
-\caption{PlantUML architecture diagram 2}
-\label{fig:plantuml2}
+  \centering
+  \includegraphics[width=\textwidth]{plantuml-architecture-2.pdf}
+  \caption{Internal component relationships within FormatterBlock. InputBlock (shown in Figure~\ref{fig:plantuml1}) serves as the entry point that forwards validated data to FormatterBlock.}
+  \label{fig:plantuml2}
 \end{figure}
+
 
 \subsection{Component Description}
 
@@ -200,7 +201,7 @@ PersistentFaultData contains:
 \item \texttt{rootCauseMetric}
 \end{itemize}
 
-The YANG data model (\texttt{belden-prism-police@2099-12-31.yang}) defines configuration and operational state.
+The data structures listed above are mapped to a YANG data model that defines both the configuration interface (telemetry definitions, rule definitions) and the read-only operational state (persistent fault entries). The YANG model serves as the contract between the framework and external management systems accessing the router via NETCONF (Section~5.8.4).
 
 \subsection{Data Flow and Control Flow}
 
@@ -209,8 +210,8 @@ The YANG data model (\texttt{belden-prism-police@2099-12-31.yang}) defines confi
 The prototype receives data through two paths:
 
 \begin{itemize}
-\item \gls{yang}/\gls{netconf} path via \texttt{netconfd-pro}
-\item Message bus path via topic \texttt{i/prism/telemetry}
+\item \textbf{North-south path} (YANG/NETCONF): Configuration commits from \texttt{netconfd-pro} deliver telemetry definitions and rule definitions through the \texttt{PrismPoliceConfigCache} component.
+\item \textbf{East-west path} (message bus): The ZeroMQ topic \texttt{i/prism/telemetry} delivers telemetry samples. Additionally, telemetry definitions and rule definitions are also delivered via YANG-modelled key-value pairs on the message bus, assembled by \texttt{PrismPoliceCallbacks}.
 \end{itemize}
 
 Both paths converge at \texttt{InputBlock}.
@@ -227,7 +228,7 @@ Processing phases:
 \item Configuration processing
 \item Sample bucketing
 \item Topological sort
-\item Timestamp sort
+\item Timestamp sort (within each telemetry ID; does not alter the inter-telemetry topological order from step~5)
 \item Sample processing
 \end{enumerate}
 
@@ -262,11 +263,11 @@ Dependencies are declared in \texttt{RuleDefinition.DependsOn}. The method \text
 
 \subsubsection{Root-Cause Traversal}
 
-Traversal uses DFS with visited set and follows \texttt{DependsOn} chains. Selection is greedy and order-dependent.
+Traversal uses \gls{dfs} with visited set and follows \texttt{DependsOn} chains. Selection is greedy and order-dependent.
 
 \subsubsection{Transitive Impact Computation and Suppression}
 
-Impacts are computed via BFS over \texttt{reverseDependencies}. Suppression window is 60 samples.
+Impacts are computed via \gls{bfs} over \texttt{reverseDependencies}. Suppression window is 60 samples.
 \subsection{Implementation Details}
 
 \subsubsection{Technology Stack}
@@ -283,7 +284,7 @@ C++20 & Implementation language \\
 ZeroMQ (zmq) & Message bus communication \\
 \texttt{netconfd-pro} & \gls{yang}/\gls{netconf} configuration engine \\
 \gls{yang} & Configuration and operational state data model \\
-Boost.Test & Unit testing framework \\
+Boost Test & Unit testing framework \\
 \texttt{std::system()} & Resolution script execution (fork + exec) \\
 \texttt{std::recursive\_mutex} & Thread-safe access to shared state \\
 \texttt{std::deque} & EventQueue backing store \\
@@ -319,13 +320,14 @@ The prototype is validated through a structured unit test suite implemented usin
 
 Each test case is identified by a unique test ID (T01--T47) and is mapped to one or more requirements. The test suite is organised into the following test files:
 
+
 \begin{table}[htbp]
 \centering
 \begin{tabular}{p{5cm} p{8cm}}
 \hline
 Test File & Scope \\
 \hline
-\texttt{requirements\_traceability\_test.cpp} & Primary requirements coverage (T01--T45) \\
+\texttt{requirements\_traceability\_test.cpp} & Primary requirements coverage (T01--T45), including NETCONF operational state validation (T10) \\
 \texttt{comprehensive\_test.cpp} & End-to-end integration across all components \\
 \texttt{episode\_tracking\_test.cpp} & Episode lifecycle transitions \\
 \texttt{automatic\_resolution\_test.cpp} & Resolution execution and suppression \\
@@ -336,7 +338,7 @@ Test File & Scope \\
 \texttt{episode\_counting\_test.cpp} & Episode counter behaviour \\
 \texttt{extreme\_edge\_cases\_test.cpp} & Stress and boundary conditions \\
 \texttt{messagebus\_mock\_test.cpp} & Message bus abstraction and mocking \\
-\texttt{messagebus\_integration\_test.cpp} & End-to-end message bus communication path \\
+\texttt{messagebus\_integration\_test.cpp} & End-to-end message bus communication path, including NETCONF operational state query via \texttt{handlePersistentFault} callback \\
 \texttt{north\_south\_east\_west\_test.cpp} & Configuration and data path integration \\
 \texttt{critical\_coverage\_test.cpp} & Validation of critical execution paths \\
 \hline
@@ -344,6 +346,7 @@ Test File & Scope \\
 \caption{Test files and scope}
 \label{tab:test-files-scope}
 \end{table}
+
 
 Tests are compiled with the \texttt{UNIT\_TEST} preprocessor flag, which enables internal state accessors in \texttt{FormatterBlock} (e.g., \texttt{isTelemetryActive()}, \texttt{getEpisodeId()}, \texttt{getFault()}, \texttt{isSuppressed()}, \texttt{hasResolutionExecuted()}) without modifying the production interface.
 
@@ -357,11 +360,11 @@ Second, tests exercise the complete processing pipeline by submitting data throu
 
 Third, tests verify observable state changes (episode IDs, active/inactive status, fault records, suppression flags, persistent fault entries) rather than internal implementation mechanics. This makes the test suite resilient to internal refactoring as long as the observable behaviour remains correct.
 
-[PLACEHOLDER: Use Case Diagram --- Test scenarios covering fault detection, episode lifecycle, dependency chain traversal, resolution execution, suppression, and persistent fault detection]
-
+The test scenarios cover fault detection, episode lifecycle transitions, dependency chain traversal, resolution execution, suppression mechanics, and persistent fault detection. These scenarios are documented in the test specification (Table~\ref{tab:test-specification}).
+\FloatBarrier
 \subsection{Test Traceability Matrix}
 
-Table 6.2 maps each requirement to the test cases that validate it. This matrix ensures that every functional and non-functional requirement defined in Section 5.2 is covered by at least one test case, and that the coverage relationship is explicit and auditable.
+Table~\ref{tab:test-traceability-matrix} maps each requirement to the test cases that validate it. This matrix ensures that every functional and non-functional requirement defined in Section 5.2 is covered by at least one test case, and that the coverage relationship is explicit and auditable.
 
 \begin{table}[htbp]
 \centering
@@ -393,10 +396,10 @@ NFR11 & Thread-safe concurrent operation & T22, T30 \\
 \caption{Test traceability matrix}
 \label{tab:test-traceability-matrix}
 \end{table}
-
+\FloatBarrier
 \subsection{Test Specification}
 
-Table 6.3 provides the detailed test specification. For each test, the table lists the Boost.Test case name, the requirements verified, and the expected result that constitutes a pass.
+Table~\ref{tab:test-specification} provides the detailed test specification. For each test, the table lists the Boost.Test case name, the requirements verified, and the expected result that constitutes a pass.
 
 \begin{table}[htbp]
 \centering
@@ -470,14 +473,14 @@ Resolution script resource limits. No timeouts, memory limits, or sandboxing are
 
 Recovery retry or alternative strategies. Resolution executes at most once per episode. If the script fails, no retry or alternative recovery is attempted instead reported as persistent fault (Section 5.6.4).
 
-Configuration rollback. No mechanism exists to roll back to a previous configuration state.
+Configuration rollback. If a YANG/NETCONF configuration commit introduces invalid or undesirable rule definitions (e.g., rules that create dependency cycles or reference non-existent telemetry sources), the framework applies the new configuration but provides no mechanism to revert to the previous set of telemetry definitions and rule definitions. Rollback must be performed externally through the NETCONF server by re-committing the prior configuration.
 
 \subsection{Summary}
 
-This chapter described the prototype implementation of the stateful \gls{fdir} framework on the Belden/Hirschmann PRISM industrial router platform. The prototype realises the seven conceptual components defined in Section 5.8.1 as C++20 classes, integrated through the \texttt{IDataRepository} interface and coordinated by \texttt{FormatterBlock} as the central facade. Two platform integration layers (\texttt{PrismPoliceCallbacks}, \texttt{PrismPoliceConfigCache}) bridge the PRISM platform's ZeroMQ message bus and \gls{yang}/\gls{netconf} configuration engine to the framework's internal data model.
+This chapter described the prototype implementation of the stateful \gls{fdir} framework on the Belden/Hirschmann PRISM industrial router platform. The unit test suite executes in a host-compiled environment using mock message bus interfaces. Integration tests T46 and T47 verify the callback interface against the platform's ZeroMQ message bus abstraction layer; full end-to-end validation on the physical router hardware is performed as part of the platform's module test infrastructure (Section~6.5.1) but is not included in the automated unit test suite. The prototype realises the seven conceptual components defined in Section 5.8.1 as C++20 classes, integrated through the \texttt{IDataRepository} interface and coordinated by \texttt{FormatterBlock} as the central facade. Two platform integration layers (\texttt{PrismPoliceCallbacks}, \texttt{PrismPoliceConfigCache}) bridge the PRISM platform's ZeroMQ message bus and \gls{yang}/\gls{netconf} configuration engine to the framework's internal data model.
 
 The seven-phase processing pipeline defined in Section 5.8.2 is implemented in FormatterBlock::processAllEvents(), invoked at from the main loop. The pipeline processes configuration events before sample events, sorts samples in dependency-topological then timestamp order, evaluates rules, tracks episode lifecycles, performs root-cause analysis, executes resolution scripts, and applies transitive suppression to downstream impacts.
 
-A structured test suite of 47 test cases plus diamond dependency tests validates the prototype against all eight functional requirements (FR1--FR8) and ten of eleven non-functional requirements (NFR1--NFR3, NFR5--NFR11). NFR4 (bounded resource usage) is partially addressed through a placeholder test that requires memory profiling for complete validation. Two integration tests (T46, T47) additionally verify the platform callback interface, covering both the north-south configuration path and the east-west message bus communication path. The test traceability matrix (Table 6.2) and test specification (Table 6.3) establish a traceable link between implemented tests and requirements, supporting the evaluation in Chapter 7.
+A structured test suite of 47 test cases validates the prototype against all eight functional requirements (FR1--FR8) and ten of eleven non-functional requirements (NFR1--NFR3, NFR5--NFR11). NFR4 (bounded resource usage) is partially addressed through a placeholder test that requires memory profiling for complete validation. Two integration tests (T46, T47) additionally verify the platform callback interface, covering the north-south configuration path (management system pushes configuration to the framework) and the east-west message bus communication path (telemetry samples delivered between services). The south-north path (framework exposes operational state to management systems) is validated by T10, which verifies that persistent fault entries are retrievable through the NETCONF operational state interface. The test traceability matrix (Table~\ref{tab:test-traceability-matrix}) and test specification (Table~\ref{tab:test-specification}) establish a traceable link between implemented tests and requirements, supporting the evaluation in Chapter 7.
 
 The following chapter evaluates the prototype against the requirements and research questions, using the test results and scenario-based analysis to assess the framework's correctness, determinism, and suitability for industrial router deployment.

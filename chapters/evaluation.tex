@@ -42,6 +42,25 @@ The prototype (\texttt{prism-police}) was deployed in a Docker container that re
 Prometheus (0.32.0) and Nagios (4.5.12) were deployed in the same Docker-based environment with equivalent monitoring configurations: the same telemetry sources, the same threshold rules, and the same fault injection sequences. All three systems received identical telemetry streams during each experiment. The specific versions of Prometheus (0.32.0) and Nagios (4.5.12) were recorded during the experiments, which gives exact reproducibility of the comparison.
 
 Limitation: The Docker-based deployment introduces containerisation overhead (network namespacing, filesystem layering) that affects all three systems equally. The measurements reflect containerised performance, not bare-metal performance.
+\subsubsection{Measurement Methodology}
+
+Resource consumption and alert volume were measured using operating system interfaces on the Linux-based experiment host. The measurement tools and methods differ by system due to their different deployment models:
+
+\begin{itemize}
+\item \textbf{Memory (prism-police):} Resident Set Size (RSS) was read from \texttt{/proc/\textit{PID}/status} (field \texttt{VmRSS}) once after a 10-second stabilisation period following experiment start. RSS represents the portion of the process's memory held in physical RAM. A single snapshot was taken per experiment run.
+\item \textbf{Memory (Prometheus + Alertmanager):} RSS of both container main processes (Prometheus and Alertmanager) was sampled once per second for the experiment duration using \texttt{ps -o rss=}. The per-second values were summed across both processes and the reported value is the arithmetic mean across all samples.
+\item \textbf{Memory (Nagios):} The \texttt{MemoryCurrent} property was read from the \texttt{nagios4} systemd service unit via \texttt{systemctl show nagios4 -p MemoryCurrent} at experiment end. This value represents the current memory consumption of the service's cgroup as reported by the kernel.
+\item \textbf{CPU (prism-police):} Sampled once per second via \texttt{ps -p \textit{PID} -o \%cpu=} for the experiment duration (120--300 samples depending on scenario). The reported value is the arithmetic mean across all samples.
+\item \textbf{CPU (Prometheus + Alertmanager):} Measured using \texttt{pidstat -p \textit{PIDs} 1 \textit{duration}} at one-second intervals for both container main processes. The reported value is the sum of the average CPU percentages of both processes.
+\item \textbf{CPU (Nagios):} The \texttt{CPUUsageNSec} property was read from the \texttt{nagios4} systemd service unit at experiment start and end. The reported CPU usage is the delta between the two readings, representing total CPU time consumed during the measurement window.
+\item \textbf{Alert volume (prism-police):} Fault episode count reported by the framework at experiment end.
+\item \textbf{Alert volume (Prometheus):} Notification count from a webhook receiver (a Python HTTP server on port 9099 that increments a counter for each POST received from Alertmanager).
+\item \textbf{Alert volume (Nagios):} Count of \texttt{SERVICE NOTIFICATION:} entries in \texttt{/var/log/nagios4/nagios.log} with timestamps falling within the measurement window, extracted via \texttt{awk}.
+\end{itemize}
+
+Each experiment was preceded by a 10--20 second warm-up period (10 seconds for E0--E2, 20 seconds for E3 scenarios) excluded from measurement. The experiment suites were executed via automated shell scripts (\texttt{measure\_e0.sh} through \texttt{measure\_e3\_1000.sh} for prism-police, \texttt{run\_prometheus\_suite.sh} for Prometheus, and \texttt{run\_nagios\_suite.sh} for Nagios) to ensure reproducible execution sequences.
+
+\textbf{Out-of-memory behaviour:} The prototype does not implement explicit handling for memory allocation failures. If the operating system denies a memory allocation request, the C++ runtime throws \texttt{std::bad\_alloc}, which is unhandled and terminates the process. The bounded event queue (drop-oldest policy, capacity 1000) and the absence of persistent telemetry storage are designed to prevent unbounded memory growth under normal operation. On the target platform, the service lifecycle manager would detect the terminated process and restart it.
 
 \subsubsection{Experiment Design}
 
@@ -134,7 +153,7 @@ The lower CPU utilisation of prism-police under storm conditions is attributable
 
 \textbf{Interpretation:}
 
-The CPU data supports the claim that the framework's processing overhead remains bounded relative to the ingestion rate (NFR4, Principle 5). However, the absolute values are measured on a desktop-class CPU and cannot be directly extrapolated to the embedded router platform. The relative comparison prism-police consuming 4× to 13× less CPU than the reference systems under storm conditions indicates that the architectural decisions (bounded queue, episode gating, suppression) contribute to reduced processing overhead.
+The CPU data supports the claim that the framework's processing overhead remains bounded relative to the ingestion rate (NFR4, Principle 5). However, the absolute values are measured on a desktop-class CPU and cannot be directly extrapolated to the embedded router platform. The relative comparison prism-police consuming 4× to 13× less CPU than the reference systems under storm conditions indicates that the architectural decisions (bounded queue, episode gating, suppression) contribute to reduced processing overhead. The idle CPU consumption (0.38\%) caused by the 100\,ms polling loop is an identified optimisation point: replacing the fixed-interval polling with an event-driven wake-up mechanism (e.g., a condition variable signalled by the InputBlock upon enqueue) would reduce idle CPU consumption to near zero without affecting processing behaviour under load.
 
 \subsubsection{Memory Utilisation}
 
@@ -164,11 +183,11 @@ Prometheus has the highest baseline memory consumption (196 MB at idle), which r
 
 Under increasing load (E3), all three systems show memory growth. Prometheus grows from 196 MB to 374 MB (1.9× increase from E0 to E3-1000). Nagios grows from 6.70 MB to 41.40 MB (6.2× increase). Prism-police grows from 13.92 MB to 29.37 MB (2.1× increase).
 
-Prism-police's memory growth from E0 to E3-1000 is 15.45 MB. This growth is attributable to the event queue contents, sample storage, fault records, and suppression counters that accumulate during high-rate ingestion. The bounded event queue (maximum 1000 events) limits the queue's contribution to memory growth, but sample storage per telemetry ID and fault records are not explicitly bounded in the current implementation.
+Prism-police's memory growth from E0 to E3-1000 is 15.45 MB. The bounded event queue itself does not contribute to this growth: it has a fixed capacity of 1000 elements and operates as a drop-oldest ring buffer whose memory footprint is constant regardless of ingestion rate. The observed growth is instead attributable to data structures outside the queue that scale with the number of distinct telemetry sources: sample storage (one stored sample per telemetry ID), fault records (one per active violation), suppression counters (one per suppressed telemetry), the \texttt{resolvedEpisodes} set, and the \texttt{persistentFaults} vector. In E3-1000, 1000 distinct telemetry sources are active simultaneously, each requiring its own per-source state. The \texttt{resolvedEpisodes} set and \texttt{persistentFaults} vector grow monotonically because the pruning mechanism described in Section~5.6.3 is not implemented in the prototype. Bounding these structures to the number of concurrently active episodes (rather than the cumulative total) is an identified optimisation point for future work.
 
 \textbf{Interpretation:}
 
-The memory data shows that prism-police's memory consumption remains in the range of 14–30 MB across all tested scenarios. This is within the memory budget of typical industrial router platforms, which provide hundreds of megabytes of RAM. However, the test T16 (NFR4 — bounded resource usage) is a placeholder in the current test suite and does not verify that memory consumption remains bounded over extended operational periods (days or weeks). The 2.1× growth factor under storm conditions suggests that memory usage is correlated with ingestion rate, which is expected given the sample storage model. Whether this growth is bounded over time requires long-duration soak testing not performed in this evaluation.
+The memory data shows that prism-police's memory consumption ranges from 13.92~MB (E0, idle) to 29.37~MB (E3-1000, maximum tested load). For context, a representative embedded industrial router platform provides 256~MB of RAM, of which the operating system and other services consume a portion. Prism-police's peak measured consumption of 29.37~MB represents approximately 11.5\% of a 256~MB memory budget, leaving substantial headroom for other platform services. However, the test T16 (NFR4 --- bounded resource usage) is a placeholder in the current test suite and does not verify that memory consumption remains bounded over extended operational periods (days or weeks). The 2.1\texttimes{} growth factor under storm conditions indicates that memory usage is correlated with the number of concurrently active telemetry sources. Whether this growth remains bounded over time --- particularly whether the monotonically growing \texttt{resolvedEpisodes} set and \texttt{persistentFaults} vector cause unbounded accumulation during long-duration operation --- requires soak testing not performed in this evaluation. Implementing the episode-end pruning mechanism defined in Section~5.6.3 would bound these structures and is identified as a necessary optimisation for production deployment.
 
 \begin{figure}[htbp]
 \centering
@@ -214,7 +233,7 @@ Prometheus and Nagios provide capabilities that prism-police does not: graphical
 \subsection{Requirements Validation}
 
 This section evaluates each functional and non-functional requirement against the combined evidence from unit tests (Chapter~6), quantitative experiments (Section~7.2), and qualitative analysis (Section~7.3). Table~7.5 summarises the validation status and supporting evidence for each requirement. All eight functional requirements are validated. Nine of eleven non-functional requirements are validated; NFR4 (bounded resource usage) and NFR5 (timely fault handling) are partially validated due to the absence of long-duration soak testing and production-platform latency measurements, respectively.
-
+\FloatBarrier
 \begin{table}[htbp]
 \centering
 \caption{Requirements validation summary}
@@ -318,7 +337,7 @@ The integrated architecture composes seven components into a seven-phase process
 
 The experiments use a single execution per scenario without statistical repetition. Variability due to system scheduling, container overhead, or background processes is not quantified. The measurements should be treated as indicative rather than statistically robust.
 
-The unit tests use \texttt{FormatterBlock::resetIdsForTesting()} to ensure test isolation, but the \texttt{\#ifdef UNIT\_TEST} conditional compilation means that the tested code path includes accessors not present in the production build. The functional behaviour is identical, but the memory layout differs slightly.
+The unit test suite relies on a test-specific reset mechanism to ensure isolation between test cases: internal identifier counters are reset before each test so that test outcomes do not depend on execution order. This reset mechanism is compiled only into the test build through conditional compilation directives; the production build does not include it. Consequently, the tested binary differs slightly from the production binary in that it exposes additional internal accessors used exclusively by the test harness. The functional behaviour rule evaluation, episode management, dependency traversal, resolution execution is identical between both builds, but the presence of additional accessor methods means that the object memory layout may differ marginally. This difference does not affect the validity of functional test results but means that memory consumption measurements taken on the test build are not directly comparable to the production build.
 
 \subsubsection{External Validity}
 
@@ -335,7 +354,7 @@ The alert count metric for prism-police (1 in E1 and E2) reflects the episode mo
 \subsection{Limitations}
 
 \begin{enumerate}
-\item No production-platform evaluation. All experiments were conducted on desktop-class hardware in Docker containers. Resource consumption on the actual Belden/Hirschmann PRISM router platform was not measured. The 100ms polling interval, fork+exec resolution overhead, and memory consumption may behave differently on embedded ARM or MIPS processors with limited cache and memory bandwidth.
+\item No production-platform evaluation. All experiments were conducted on desktop-class hardware in Docker containers. The Docker-based environment used for evaluation is the same environment used for development and simulation of the PRISM platform; it replicates the \gls{soa} service structure and message bus topology but does not reproduce the hardware constraints of the target router. Resource consumption on the actual Belden/Hirschmann PRISM router platform was not measured. The 100\,ms polling interval, fork+exec resolution overhead, and memory consumption may behave differently on embedded ARM or MIPS processors with limited cache and memory bandwidth. Additionally, the evaluation host does not carry production network traffic; on the target router, CPU and memory are shared with software-based packet processing (e.g., WLAN forwarding), which competes for the same resources and may affect FDIR processing latency and memory availability under real operating conditions.
 
 \item NFR4 not fully validated. Bounded resource usage over extended operational periods (days, weeks) was not tested. The placeholder test T16 does not perform actual memory profiling. Whether the \texttt{resolvedEpisodes} set, \texttt{persistentFaults} vector, or other tracking structures grow unboundedly over long operation remains unverified. NFR5 not validated under production conditions. Detection-to-resolution latency was measured only as a proxy in the unit test environment. The 100ms polling interval establishes a theoretical floor, but actual latency including message bus delivery, \gls{netconf} processing, and resolution script execution was not measured end-to-end on the target platform.
 
